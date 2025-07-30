@@ -1,0 +1,20 @@
+# Dependências mínimas para Web Scraper AI
+# Para ambientes com problemas de compatibilidade
+
+# Core web scraping
+selenium==4.15.0
+beautifulsoup4==4.12.0
+requests==2.31.0
+webdriver-manager==4.0.0
+
+# Environment and configuration
+python-dotenv==1.0.0
+
+# Basic UI (optional - graceful fallback if not available)
+colorama==0.4.6
+
+# AI integration (optional)
+openai==1.3.0
+
+# Note: pandas, openpyxl, PyMuPDF, rich are optional
+# The system will work without them with reduced functionality

@@ -1,0 +1,170 @@
+{
+  "name": "Example Job Site",
+  "base_url": "https://exemplo-vagas.com",
+  "description": "Site de vagas de exemplo - modelo para configuração",
+  
+  "selectors": {
+    "job_listings": {
+      "type": "css",
+      "value": ".job-card",
+      "wait_condition": "presence"
+    },
+    "job_title": {
+      "type": "css", 
+      "value": ".job-title h3",
+      "attribute": "text"
+    },
+    "company_name": {
+      "type": "css",
+      "value": ".company-name",
+      "attribute": "text"
+    },
+    "job_location": {
+      "type": "css",
+      "value": ".job-location",
+      "attribute": "text"
+    },
+    "salary": {
+      "type": "css",
+      "value": ".salary-info",
+      "attribute": "text"
+    },
+    "job_link": {
+      "type": "css",
+      "value": "a.job-link",
+      "attribute": "href"
+    },
+    "next_page": {
+      "type": "css",
+      "value": "button.next-page",
+      "wait_condition": "clickable"
+    }
+  },
+
+  "auth_config": {
+    "required": false,
+    "method": "form",
+    "username_selector": {
+      "type": "css",
+      "value": "input[name='email']"
+    },
+    "password_selector": {
+      "type": "css", 
+      "value": "input[name='password']"
+    },
+    "submit_selector": {
+      "type": "css",
+      "value": "button[type='submit']"
+    },
+    "credentials_env_prefix": "EXEMPLO"
+  },
+
+  "pagination_config": {
+    "enabled": true,
+    "next_button_selector": {
+      "type": "css",
+      "value": "button.next-page"
+    },
+    "max_pages": 5,
+    "wait_between_pages": 3.0,
+    "stop_on_no_results": true
+  },
+
+  "extraction_rules": [
+    {
+      "name": "job_title",
+      "selector": {
+        "type": "css",
+        "value": ".job-title h3"
+      },
+      "data_type": "text",
+      "required": true
+    },
+    {
+      "name": "company",
+      "selector": {
+        "type": "css", 
+        "value": ".company-name"
+      },
+      "data_type": "text",
+      "required": true
+    },
+    {
+      "name": "location",
+      "selector": {
+        "type": "css",
+        "value": ".job-location"
+      },
+      "data_type": "text",
+      "required": false,
+      "default_value": "Não informado"
+    },
+    {
+      "name": "salary",
+      "selector": {
+        "type": "css",
+        "value": ".salary-info"
+      },
+      "data_type": "text",
+      "post_process": "extract_salary_range",
+      "required": false
+    },
+    {
+      "name": "job_url", 
+      "selector": {
+        "type": "css",
+        "value": "a.job-link"
+      },
+      "data_type": "url",
+      "required": true
+    }
+  ],
+
+  "wait_time": 3.0,
+  "timeout": 30.0,
+  "retry_attempts": 3,
+
+  "headers": {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+  },
+
+  "javascript_enabled": true,
+  "download_files": false,
+
+  "ai_instructions": {
+    "extraction_template": {
+      "job_title": "Extrair o título/cargo da vaga de emprego",
+      "company_name": "Extrair o nome da empresa que está oferecendo a vaga",
+      "job_location": "Extrair a localização da vaga (cidade, estado)",
+      "salary_range": "Extrair faixa salarial se disponível, converter para formato numérico",
+      "job_requirements": "Extrair requisitos principais da vaga (experiência, formação)",
+      "job_type": "Identificar tipo da vaga (CLT, PJ, Estágio, etc.)",
+      "seniority_level": "Identificar nível de senioridade (Júnior, Pleno, Senior)"
+    },
+    "post_processing_instructions": [
+      "Padronizar nomes de cidades (São Paulo, Rio de Janeiro, etc.)",
+      "Converter salários para formato numérico quando possível",
+      "Categorizar tipos de vaga de forma consistente",
+      "Extrair tecnologias/skills mencionadas nos requisitos"
+    ],
+    "data_validation": {
+      "required_fields": ["job_title", "company_name"],
+      "salary_format": "Converter valores monetários para números",
+      "location_standardization": "Padronizar nomes de cidades"
+    }
+  },
+
+  "custom_scripts": [
+    "// Script para fechar popups\nif (document.querySelector('.popup-overlay')) { document.querySelector('.popup-close').click(); }",
+    "// Script para aceitar cookies\nif (document.querySelector('.cookie-banner')) { document.querySelector('.accept-cookies').click(); }"
+  ],
+
+  "metadata": {
+    "created_by": "WebScraperAI",
+    "category": "jobs",
+    "difficulty": "medium", 
+    "estimated_items_per_page": 20,
+    "notes": "Site com estrutura padrão de vagas, boa para iniciantes"
+  }
+}

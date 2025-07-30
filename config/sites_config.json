@@ -1,0 +1,218 @@
+{
+  "config_version": "1.0",
+  "default_settings": {
+    "wait_time": 3.0,
+    "timeout": 30.0,
+    "retry_attempts": 3,
+    "javascript_enabled": true,
+    "download_files": false,
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+      "Accept-Encoding": "gzip, deflate, br"
+    }
+  },
+
+  "site_templates": {
+    "job_site_template": {
+      "name": "Template Base para Sites de Vaga",
+      "base_url": "",
+      "description": "Template padrão para sites de emprego",
+      "selectors": {
+        "job_listings": {
+          "type": "css",
+          "value": "",
+          "wait_condition": "presence"
+        },
+        "job_title": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "company_name": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "job_location": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "salary": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "job_link": {
+          "type": "css",
+          "value": "",
+          "attribute": "href"
+        }
+      },
+      "auth_config": {
+        "required": false,
+        "method": "form",
+        "username_selector": {"type": "css", "value": ""},
+        "password_selector": {"type": "css", "value": ""},
+        "submit_selector": {"type": "css", "value": ""}
+      },
+      "pagination_config": {
+        "enabled": false,
+        "next_button_selector": {"type": "css", "value": ""},
+        "max_pages": 5,
+        "wait_between_pages": 3.0,
+        "stop_on_no_results": true
+      }
+    },
+
+    "ecommerce_template": {
+      "name": "Template Base para E-commerce",
+      "base_url": "",
+      "description": "Template padrão para sites de e-commerce",
+      "selectors": {
+        "product_listings": {
+          "type": "css",
+          "value": "",
+          "wait_condition": "presence"
+        },
+        "product_name": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "product_price": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "product_link": {
+          "type": "css",
+          "value": "",
+          "attribute": "href"
+        },
+        "product_image": {
+          "type": "css",
+          "value": "",
+          "attribute": "src"
+        }
+      }
+    },
+
+    "news_template": {
+      "name": "Template Base para Sites de Notícias",
+      "base_url": "",
+      "description": "Template padrão para sites de notícias",
+      "selectors": {
+        "article_listings": {
+          "type": "css",
+          "value": "",
+          "wait_condition": "presence"
+        },
+        "article_title": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "article_author": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "article_date": {
+          "type": "css",
+          "value": "",
+          "attribute": "text"
+        },
+        "article_link": {
+          "type": "css",
+          "value": "",
+          "attribute": "href"
+        }
+      }
+    }
+  },
+
+  "active_sites": [
+    {
+      "id": "example_job_site",
+      "config_file": "sites/example_job_site.json",
+      "enabled": true,
+      "priority": 1,
+      "last_updated": "2025-07-30"
+    }
+  ],
+
+  "global_ai_config": {
+    "model": "gpt-4o-mini",
+    "max_tokens": 4000,
+    "temperature": 0.1,
+    "fallback_extraction": true,
+    "common_instructions": {
+      "data_cleaning": [
+        "Remover caracteres especiais desnecessários",
+        "Padronizar formato de dados (números, datas, etc.)",
+        "Converter texto para UTF-8 quando necessário"
+      ],
+      "validation_rules": [
+        "Verificar se campos obrigatórios não estão vazios",
+        "Validar formato de URLs",
+        "Verificar consistência de dados"
+      ]
+    }
+  },
+
+  "extraction_presets": {
+    "jobs": {
+      "common_fields": ["job_title", "company", "location", "salary", "job_url"],
+      "ai_prompt_template": "Extrair informações de vaga de emprego do seguinte conteúdo HTML: {content}. Retornar JSON com campos: {fields}",
+      "post_processing": ["standardize_location", "extract_salary_numbers", "categorize_job_type"]
+    },
+    "products": {
+      "common_fields": ["product_name", "price", "product_url", "availability"],
+      "ai_prompt_template": "Extrair informações de produto do seguinte conteúdo HTML: {content}. Retornar JSON com campos: {fields}",
+      "post_processing": ["standardize_price", "check_availability"]
+    },
+    "articles": {
+      "common_fields": ["title", "author", "date", "content", "article_url"],
+      "ai_prompt_template": "Extrair informações de artigo do seguinte conteúdo HTML: {content}. Retornar JSON com campos: {fields}",
+      "post_processing": ["parse_date", "clean_content"]
+    }
+  },
+
+  "rate_limiting": {
+    "default_delay": 2.0,
+    "requests_per_minute": 30,
+    "burst_allowance": 5,
+    "backoff_strategy": "exponential"
+  },
+
+  "output_formats": {
+    "supported": ["json", "csv", "excel", "pdf"],
+    "default": "json",
+    "csv_options": {
+      "delimiter": ",",
+      "encoding": "utf-8",
+      "include_headers": true
+    },
+    "excel_options": {
+      "sheet_name": "ScrapedData",
+      "include_metadata": true
+    }
+  },
+
+  "logging": {
+    "level": "INFO",
+    "file_rotation": true,
+    "max_file_size_mb": 10,
+    "backup_count": 5
+  },
+
+  "security": {
+    "respect_robots_txt": true,
+    "user_agent_rotation": false,
+    "proxy_rotation": false,
+    "max_concurrent_requests": 3
+  }
+}
