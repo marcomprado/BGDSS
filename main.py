@@ -16,7 +16,7 @@ RESPONSABILIDADES:
 INTEGRAÇÃO NO SISTEMA:
     - Usado como comando principal: python main.py
     - Interface com sistema operacional via sys.exit()
-    - Conecta com src.ui.brazilian_sites_terminal para funcionalidade completa
+    - Conecta com src.ui.terminal para funcionalidade completa
     - Interface terminal especializada para sites governamentais
 
 SITES SUPORTADOS:
@@ -30,7 +30,7 @@ EXEMPLO DE USO:
 
 import sys
 
-from src.ui.brazilian_sites_terminal import run_brazilian_sites_terminal
+from src.ui.terminal import run_brazilian_sites_terminal
 
 
 def main() -> int:

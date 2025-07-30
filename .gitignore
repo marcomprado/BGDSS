@@ -4,6 +4,7 @@ __pycache__/
 *.pyd
 .Python
 downloads/
+.env
 logs/
 .vscode/
 .idea/

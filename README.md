@@ -132,7 +132,7 @@ web_scraper_ai/
 │   │   ├── mds_parcelas.py      # MDS Parcelas Pagas
 │   │   └── mds_saldo.py         # MDS Saldo Detalhado
 │   ├── ui/
-│   │   └── brazilian_sites_terminal.py  # Interface terminal
+│   │   └── terminal.py  # Interface terminal
 │   ├── ai/
 │   │   ├── openai_client.py     # Cliente OpenAI (opcional)
 │   │   └── navigator_agent.py   # Agente de navegação
@@ -252,7 +252,7 @@ Para adicionar suporte a um novo site:
 
 1. Criar novo módulo em `src/modules/sites/`
 2. Implementar métodos `execute_scraping()` e `_real_scraping()`
-3. Adicionar ao menu principal em `brazilian_sites_terminal.py`
+3. Adicionar ao menu principal em `terminal.py`
 4. Criar testes específicos
 
 ## 📝 Licença
