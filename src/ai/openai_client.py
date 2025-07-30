@@ -50,8 +50,23 @@ class OpenAIClient:
             self.enabled = False
             return
         
-        self.client = OpenAI(api_key=self.api_key)
-        self.enabled = True
+        try:
+            # Try to create OpenAI client with minimal configuration
+            self.client = OpenAI(api_key=self.api_key)
+            self.enabled = True
+        except Exception as e:
+            # If there's an error (like 'proxies' argument), try alternative approach
+            logger.warning(f"Failed to initialize OpenAI client normally: {e}")
+            try:
+                # Set API key directly and create client without arguments
+                openai.api_key = self.api_key
+                self.client = None  # Will use openai module directly
+                self.enabled = True
+                logger.info("Using OpenAI module directly (fallback mode)")
+            except Exception as e2:
+                logger.error(f"Failed to initialize OpenAI client: {e2}")
+                self.client = None
+                self.enabled = False
         self.max_retries = max_retries
         self.default_model = settings.OPENAI_MODEL
         self.default_temperature = settings.OPENAI_TEMPERATURE
@@ -106,24 +121,49 @@ class OpenAIClient:
             try:
                 logger.debug(f"Sending chat completion request (attempt {attempt + 1})")
                 
-                response = self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    **kwargs
-                )
+                if self.client:
+                    # Use new client interface
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs
+                    )
+                else:
+                    # Fallback to direct API call
+                    response = openai.ChatCompletion.create(
+                        model=model,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        **kwargs
+                    )
                 
-                result = {
-                    'content': response.choices[0].message.content,
-                    'usage': {
-                        'prompt_tokens': response.usage.prompt_tokens,
-                        'completion_tokens': response.usage.completion_tokens,
-                        'total_tokens': response.usage.total_tokens
-                    },
-                    'model': response.model,
-                    'finish_reason': response.choices[0].finish_reason
-                }
+                if self.client:
+                    # New client format
+                    result = {
+                        'content': response.choices[0].message.content,
+                        'usage': {
+                            'prompt_tokens': response.usage.prompt_tokens,
+                            'completion_tokens': response.usage.completion_tokens,
+                            'total_tokens': response.usage.total_tokens
+                        },
+                        'model': response.model,
+                        'finish_reason': response.choices[0].finish_reason
+                    }
+                else:
+                    # Legacy format
+                    result = {
+                        'content': response['choices'][0]['message']['content'],
+                        'usage': {
+                            'prompt_tokens': response['usage']['prompt_tokens'],
+                            'completion_tokens': response['usage']['completion_tokens'],
+                            'total_tokens': response['usage']['total_tokens']
+                        },
+                        'model': response.get('model', model),
+                        'finish_reason': response['choices'][0].get('finish_reason', 'stop')
+                    }
                 
                 logger.info(f"Chat completion successful. Tokens used: {result['usage']['total_tokens']}")
                 return result

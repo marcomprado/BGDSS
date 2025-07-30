@@ -9,31 +9,48 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
-from colorama import init, Fore, Style
-
-init(autoreset=True)
-
-
 class ColoredFormatter(logging.Formatter):
     """Custom formatter with colored output for console."""
     
+    # ANSI color codes
     COLORS = {
-        'DEBUG': Fore.CYAN,
-        'INFO': Fore.GREEN,
-        'WARNING': Fore.YELLOW,
-        'ERROR': Fore.RED,
-        'CRITICAL': Fore.RED + Style.BRIGHT
+        'DEBUG': '\033[36m',    # Cyan
+        'INFO': '\033[32m',     # Green
+        'WARNING': '\033[33m',  # Yellow
+        'ERROR': '\033[31m',    # Red
+        'CRITICAL': '\033[91m'  # Bright Red
     }
+    RESET = '\033[0m'
     
     def format(self, record: logging.LogRecord) -> str:
-        levelname = record.levelname
-        if levelname in self.COLORS:
-            record.levelname = f"{self.COLORS[levelname]}{levelname}{Style.RESET_ALL}"
+        # Create a copy of the record to avoid affecting other handlers
+        record_copy = logging.LogRecord(
+            record.name,
+            record.levelno,
+            record.pathname,
+            record.lineno,
+            record.msg,
+            record.args,
+            record.exc_info,
+            record.funcName
+        )
+        record_copy.created = record.created
+        record_copy.msecs = record.msecs
+        # Copy additional attributes that might exist
+        for attr in ['stack_info', 'sinfo']:
+            if hasattr(record, attr):
+                setattr(record_copy, attr, getattr(record, attr))
         
-        if record.levelname == 'ERROR' or record.levelname == 'CRITICAL':
-            record.msg = f"{Fore.RED}{record.msg}{Style.RESET_ALL}"
+        # Apply colors to the copy
+        levelname = record_copy.levelname
+        if levelname in self.COLORS:
+            record_copy.levelname = f"{self.COLORS[levelname]}{levelname}{self.RESET}"
+        
+        if levelname in ['ERROR', 'CRITICAL']:
+            # Add red color to the message itself for errors
+            record_copy.msg = f"{self.COLORS['ERROR']}{record_copy.msg}{self.RESET}"
             
-        return super().format(record)
+        return super().format(record_copy)
 
 
 class Logger:
@@ -59,7 +76,7 @@ class Logger:
         if self._logger.handlers:
             return
         
-        logs_dir = Path(__file__).parent.parent.parent.parent / 'logs'
+        logs_dir = Path(__file__).parent.parent.parent / 'logs'
         logs_dir.mkdir(exist_ok=True)
         
         console_handler = logging.StreamHandler()
@@ -78,6 +95,7 @@ class Logger:
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
+        # Use plain formatter for file handler (no colors)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'

@@ -1,4 +1,3 @@
-.env
 __pycache__/
 *.pyc
 *.pyo
@@ -6,6 +5,5 @@ __pycache__/
 .Python
 downloads/
 logs/
-drivers/
 .vscode/
 .idea/

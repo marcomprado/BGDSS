@@ -3,39 +3,58 @@
 Web Scraper AI - Main Entry Point
 
 FUNCIONALIDADE:
-    Este arquivo serve como ponto de entrada principal da aplicação Web Scraper AI.
-    Sua única responsabilidade é delegar a execução para a interface CLI apropriada,
-    mantendo o código limpo e organizado.
+    Este arquivo serve como ponto de entrada principal da aplicação Web Scraper AI
+    para sites do governo brasileiro. Sua responsabilidade é inicializar a interface
+    terminal especializada para coleta de dados governamentais.
 
 RESPONSABILIDADES:
     - Ponto de entrada único da aplicação
-    - Delegação para interface CLI
+    - Inicialização da interface terminal brasileira
     - Tratamento de código de saída do sistema
-    - Inicialização básica do ambiente Python
+    - Gerenciamento de interrupções do usuário
 
 INTEGRAÇÃO NO SISTEMA:
     - Usado como comando principal: python main.py
     - Interface com sistema operacional via sys.exit()
-    - Conecta com src.ui.cli_interface para funcionalidade completa
-    - Suporte a argumentos de linha de comando via CLI
+    - Conecta com src.ui.brazilian_sites_terminal para funcionalidade completa
+    - Interface terminal especializada para sites governamentais
 
-PADRÕES DE DESIGN:
-    - Facade Pattern: Interface simples para sistema complexo
-    - Single Responsibility: Apenas ponto de entrada
+SITES SUPORTADOS:
+    1. Portal Saude MG - Deliberações (PDFs)
+    2. MDS - Parcelas Pagas (dados CSV)
+    3. MDS - Saldo Detalhado por Conta (dados CSV)
 
 EXEMPLO DE USO:
-    $ python main.py --mode interactive --workers 5
-    $ python main.py --mode daemon --log-level DEBUG
+    $ python main.py
 """
 
 import sys
 
-from src.ui.cli_interface import cli
+from src.ui.brazilian_sites_terminal import run_brazilian_sites_terminal
 
 
 def main() -> int:
     """Main application entry point."""
-    return cli.run()
+    try:
+        result = run_brazilian_sites_terminal()
+        
+        if result.get('status') == 'exit':
+            return 0
+        elif result.get('status') == 'interrupted':
+            print("\nProcesso interrompido pelo usuário.")
+            return 130  # Standard exit code for Ctrl+C
+        elif result.get('status') == 'error':
+            print(f"\nErro: {result.get('error', 'Erro desconhecido')}")
+            return 1
+        else:
+            return 0
+            
+    except KeyboardInterrupt:
+        print("\nProcesso interrompido pelo usuário.")
+        return 130
+    except Exception as e:
+        print(f"\nErro fatal: {e}")
+        return 1
 
 
 if __name__ == '__main__':
