@@ -16,6 +16,8 @@ import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+from src.utils.logger import logger
+
 class BrazilianSitesTerminal:
     """
     Main terminal interface for Brazilian government sites data extraction.
@@ -120,11 +122,25 @@ class BrazilianSitesTerminal:
             year = self.get_year_input("1. Ano (obrigatorio):")
             if year is None:
                 continue
+            
+            # Handle year range input
+            year_range = None
+            if year == 998:  # Intervalo personalizado de anos
+                year_range = self.get_year_range_input()
+                if year_range is None:
+                    continue
                 
             # Get month
             month = self.get_month_input("2. Mes:")
             if month is None:
                 continue
+                
+            # Handle month range input
+            month_range = None
+            if month == 14:  # Intervalo personalizado de meses
+                month_range = self.get_month_range_input()
+                if month_range is None:
+                    continue
             
             print("")
             print("1. Iniciar coleta")
@@ -140,6 +156,13 @@ class BrazilianSitesTerminal:
                     'month': month,
                     'url': self.sites[1]['url']
                 }
+                
+                # Add range information if available
+                if year_range:
+                    config['year_range'] = year_range
+                if month_range:
+                    config['month_range'] = month_range
+                
                 self.current_config = config  # Store config for later reference
                 self.run_scraping_task(config)
                 break
@@ -285,39 +308,51 @@ class BrazilianSitesTerminal:
     def get_year_input(self, prompt: str) -> Optional[int]:
         """Get and validate year input."""
         print(prompt)
-        year_str = self.get_user_input("   Digite o ano (ex: 2024): ")
+        print("   Digite um ano específico (ex: 2024) ou:")
+        print("   1 - Todos os anos disponíveis")
+        print("   2 - Intervalo personalizado de anos")
+        print("")
+        year_str = self.get_user_input("   Digite sua opção: ")
         
         try:
             year = int(year_str)
+            
+            # Special case for "all years"
+            if year == 1:
+                return 999  # Keep internal value as 999
+            
+            # Special case for "year range"
+            if year == 2:
+                return 998  # Keep internal value as 998
+            
             # Allow any reasonable year (from 2000 to current year + 20)
             from datetime import datetime
             current_year = datetime.now().year
             if 2000 <= year <= current_year + 20:
                 return year
             else:
-                self.show_error(f"Ano deve estar entre 2000 e {current_year + 20}.")
+                self.show_error(f"Ano deve estar entre 2000 e {current_year + 20}, 1 para todos os anos, ou 2 para intervalo.")
                 return None
         except ValueError:
-            self.show_error("Ano invalido. Digite um numero.")
+            self.show_error("Entrada invalida. Digite um numero.")
             return None
 
     def get_month_input(self, prompt: str, required: bool = False) -> Optional[int]:
         """Get and validate month input."""
         print(prompt)
+        print("   1) Janeiro    2) Fevereiro   3) Marco")
+        print("   4) Abril      5) Maio        6) Junho")
+        print("   7) Julho      8) Agosto      9) Setembro")
+        print("   10) Outubro   11) Novembro   12) Dezembro")
+        
         if not required:
-            print("   1) Janeiro    2) Fevereiro   3) Marco")
-            print("   4) Abril      5) Maio        6) Junho")
-            print("   7) Julho      8) Agosto      9) Setembro")
-            print("   10) Outubro   11) Novembro   12) Dezembro")
             print("   13) Todos os meses")
+            print("   14) Intervalo personalizado de meses")
+            max_option = 14
         else:
-            print("   1) Janeiro    2) Fevereiro   3) Marco")
-            print("   4) Abril      5) Maio        6) Junho")
-            print("   7) Julho      8) Agosto      9) Setembro")
-            print("   10) Outubro   11) Novembro   12) Dezembro")
+            max_option = 12
         
         print("")
-        max_option = 13 if not required else 12
         month_str = self.get_user_input(f"   Digite sua opcao (1-{max_option}): ")
         
         try:
@@ -331,6 +366,92 @@ class BrazilianSitesTerminal:
             self.show_error("Opcao invalida. Digite um numero.")
             return None
 
+    def get_year_range_input(self) -> Optional[tuple]:
+        """Get year range input from user."""
+        print("   Configurar intervalo de anos:")
+        print("")
+        
+        # Get start year
+        start_year_str = self.get_user_input("   Ano de início (ex: 2010): ")
+        try:
+            start_year = int(start_year_str)
+        except ValueError:
+            self.show_error("Ano de início inválido.")
+            return None
+        
+        # Get end year  
+        end_year_str = self.get_user_input("   Ano de fim (ex: 2014): ")
+        try:
+            end_year = int(end_year_str)
+        except ValueError:
+            self.show_error("Ano de fim inválido.")
+            return None
+        
+        # Validate range
+        from datetime import datetime
+        current_year = datetime.now().year
+        
+        if not (2000 <= start_year <= current_year + 20):
+            self.show_error(f"Ano de início deve estar entre 2000 e {current_year + 20}.")
+            return None
+            
+        if not (2000 <= end_year <= current_year + 20):
+            self.show_error(f"Ano de fim deve estar entre 2000 e {current_year + 20}.")
+            return None
+            
+        if start_year > end_year:
+            self.show_error("Ano de início deve ser menor ou igual ao ano de fim.")
+            return None
+        
+        print(f"   Intervalo configurado: {start_year} até {end_year} ({end_year - start_year + 1} anos)")
+        return (start_year, end_year)
+
+    def get_month_range_input(self) -> Optional[tuple]:
+        """Get month range input from user."""
+        print("   Configurar intervalo de meses:")
+        print("")
+        print("   1) Janeiro    2) Fevereiro   3) Março")
+        print("   4) Abril      5) Maio        6) Junho") 
+        print("   7) Julho      8) Agosto      9) Setembro")
+        print("   10) Outubro   11) Novembro   12) Dezembro")
+        print("")
+        
+        # Get start month
+        start_month_str = self.get_user_input("   Mês de início (1-12): ")
+        try:
+            start_month = int(start_month_str)
+            if not (1 <= start_month <= 12):
+                self.show_error("Mês de início deve estar entre 1 e 12.")
+                return None
+        except ValueError:
+            self.show_error("Mês de início inválido.")
+            return None
+        
+        # Get end month
+        end_month_str = self.get_user_input("   Mês de fim (1-12): ")
+        try:
+            end_month = int(end_month_str)
+            if not (1 <= end_month <= 12):
+                self.show_error("Mês de fim deve estar entre 1 e 12.")
+                return None
+        except ValueError:
+            self.show_error("Mês de fim inválido.")
+            return None
+        
+        # Validate range
+        if start_month > end_month:
+            self.show_error("Mês de início deve ser menor ou igual ao mês de fim.")
+            return None
+        
+        month_names = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+        
+        start_name = month_names[start_month - 1]
+        end_name = month_names[end_month - 1]
+        
+        print(f"   Intervalo configurado: {start_name} até {end_name} ({end_month - start_month + 1} meses)")
+        return (start_month, end_month)
+
     def run_scraping_task(self, config: Dict[str, Any]):
         """Run the scraping task with progress tracking."""
         self.show_processing_screen(config)
@@ -340,10 +461,26 @@ class BrazilianSitesTerminal:
             if config['site'] == 'portal_saude_mg':
                 from src.modules.sites.portal_saude_mg import PortalSaudeMGScraper
                 scraper = PortalSaudeMGScraper()
-                # Convert config to new format
-                ano = str(config['year'])
-                mes = f"{config['month']:02d}" if config.get('month') and config['month'] != 13 else None
-                result = scraper.execute_scraping(ano, mes)
+                
+                # Handle range-based processing
+                if config.get('year_range') or config.get('month_range'):
+                    print("\nProcessando intervalo personalizado...")
+                    result = self.process_custom_range(scraper, config)
+                    
+                elif config['year'] == 999:  # Todos os anos
+                    print("\nProcessando todos os anos disponíveis...")
+                    result = self.process_all_years(scraper, config)
+                    
+                elif config.get('month') == 13:  # Todos os meses de um ano específico
+                    ano = str(config['year'])
+                    print(f"\nProcessando todos os meses de {ano}...")
+                    result = self.process_all_months_for_year(scraper, ano)
+                    
+                else:
+                    # Ano e mês específicos (comportamento original)
+                    ano = str(config['year'])
+                    mes = f"{config['month']:02d}" if config.get('month') else None
+                    result = scraper.execute_scraping(ano, mes)
             elif config['site'] == 'mds_parcelas':
                 from src.modules.sites.mds_parcelas import MDSParcelasScraper
                 scraper = MDSParcelasScraper()
@@ -411,9 +548,32 @@ class BrazilianSitesTerminal:
         print("Resumo da coleta:")
         print(f"- Site processado: {self.sites[self.current_site]['name']}")
         print(f"- Filtros aplicados: {self.format_config_summary(self.current_config)}")
-        print(f"- Arquivos coletados: {result.get('files_downloaded', 0)} arquivos")
+        
+        # Mostrar detalhes específicos para busca por múltiplos anos, meses ou intervalos
+        if result.get('range_description'):
+            print(f"- Intervalo processado: {result.get('range_description')}")
+            print(f"- Períodos processados: {result.get('periods_processed')}")
+            print(f"- Arquivos coletados: {len(result.get('files_downloaded', []))} arquivos")
+        elif result.get('years_processed'):
+            print(f"- Anos processados: {result.get('years_processed')} anos")
+            if result.get('years_with_data'):
+                years_list = ', '.join(map(str, sorted(result['years_with_data'], reverse=True)[:5]))
+                if len(result['years_with_data']) > 5:
+                    years_list += f" (e mais {len(result['years_with_data']) - 5})"
+                print(f"- Anos com dados: {years_list}")
+            print(f"- Arquivos coletados: {len(result.get('files_downloaded', []))} arquivos")
+        elif result.get('months_processed'):
+            print(f"- Meses processados: {result.get('months_processed')} de 12")
+            print(f"- Arquivos coletados: {len(result.get('files_downloaded', []))} arquivos")
+        else:
+            print(f"- Arquivos coletados: {len(result.get('files_downloaded', []))} arquivos")
+            
         print(f"- Tamanho total: {result.get('total_size_mb', 0):.1f} MB")
         print(f"- Tempo decorrido: {result.get('duration_minutes', 0):.1f} minutos")
+        
+        # Mostrar resumo adicional se disponível
+        if result.get('summary'):
+            print(f"- Resumo: {result.get('summary')}")
         print("")
         print(f"Arquivos salvos em: {result.get('download_path', 'downloads/')}")
         print("")
@@ -498,20 +658,354 @@ class BrazilianSitesTerminal:
         print("")
         input("Pressione Enter para continuar...")
 
+    def process_custom_range(self, scraper, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Process custom year and/or month ranges."""
+        year_range = config.get('year_range')
+        month_range = config.get('month_range')
+        
+        all_range_results = []
+        total_files_found = 0
+        periods_processed = 0
+        
+        # Determine years to process
+        if year_range:
+            start_year, end_year = year_range
+            years_to_process = list(range(start_year, end_year + 1))
+            print(f"\\nIntervalo de anos: {start_year} até {end_year} ({len(years_to_process)} anos)")
+        else:
+            # Single year from config
+            years_to_process = [config['year']]
+        
+        # Determine months to process
+        if month_range:
+            start_month, end_month = month_range
+            months_to_process = list(range(start_month, end_month + 1))
+            month_names = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                          'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+            start_name = month_names[start_month - 1]
+            end_name = month_names[end_month - 1]
+            print(f"Intervalo de meses: {start_name} até {end_name} ({len(months_to_process)} meses)")
+        elif config.get('month') == 13:
+            # All months
+            months_to_process = list(range(1, 13))
+        else:
+            # Single month or None
+            months_to_process = [config.get('month')] if config.get('month') else [None]
+        
+        print(f"\\nTotal de períodos a processar: {len(years_to_process) * len(months_to_process)}")
+        print("\\n" + "="*50)
+        
+        # Process each year
+        for year_idx, year in enumerate(years_to_process):
+            ano = str(year)
+            print(f"\\n=== [{year_idx + 1}/{len(years_to_process)}] PROCESSANDO ANO {year} ===")
+            
+            year_files = 0
+            year_months_processed = 0
+            
+            # Process each month for this year
+            for month_idx, month in enumerate(months_to_process):
+                if month is None:
+                    # No specific month
+                    try:
+                        print(f"   Processando {ano} (todos os meses)...")
+                        result = scraper.execute_scraping(ano, None)
+                        
+                        files_count = len(result.get('files_downloaded', []))
+                        if files_count > 0:
+                            print(f"   ✅ {ano}: {files_count} arquivos baixados")
+                            all_range_results.append(result)
+                            total_files_found += files_count
+                            periods_processed += 1
+                        else:
+                            print(f"   ⚪ {ano}: Nenhum arquivo encontrado")
+                            
+                    except Exception as e:
+                        print(f"   ❌ Erro em {ano}: {str(e)}")
+                        continue
+                else:
+                    # Specific month
+                    mes = f"{month:02d}"
+                    month_name = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][month - 1]
+                    
+                    try:
+                        print(f"   [{month_idx + 1}/{len(months_to_process)}] Processando {month_name}/{ano}...")
+                        result = scraper.execute_scraping(ano, mes)
+                        
+                        files_count = len(result.get('files_downloaded', []))
+                        if files_count > 0:
+                            print(f"      ✅ {month_name}/{ano}: {files_count} arquivos baixados")
+                            all_range_results.append(result)
+                            total_files_found += files_count
+                            year_files += files_count
+                            year_months_processed += 1
+                            periods_processed += 1
+                        else:
+                            print(f"      ⚪ {month_name}/{ano}: Nenhum arquivo encontrado")
+                            # For future months, stop processing this year
+                            from datetime import datetime
+                            if year == years_to_process[-1] and month > datetime.now().month:
+                                print(f"      🛑 Mês futuro detectado - parando este ano")
+                                break
+                                
+                    except Exception as e:
+                        print(f"      ❌ Erro em {month_name}/{ano}: {str(e)}")
+                        continue
+            
+            # Year summary
+            if months_to_process != [None]:  # Only if processing specific months
+                print(f"   📊 Resumo {ano}: {year_files} arquivos em {year_months_processed} meses")
+        
+        # Consolidate results
+        return self.consolidate_range_results(all_range_results, config, periods_processed, total_files_found)
+    
+    def consolidate_range_results(self, range_results: List[Dict[str, Any]], config: Dict[str, Any], periods_processed: int, total_files: int) -> Dict[str, Any]:
+        """Consolidate results from custom range processing."""
+        if not range_results:
+            return {
+                'success': False,
+                'files_downloaded': [],
+                'total_files': 0,
+                'errors': ['Nenhum período processado com sucesso'],
+                'periods_processed': 0
+            }
+        
+        # Consolidar arquivos de todos os períodos
+        all_files = []
+        all_errors = []
+        total_duration = 0
+        total_size_mb = 0
+        
+        for result in range_results:
+            all_files.extend(result.get('files_downloaded', []))
+            all_errors.extend(result.get('errors', []))
+            total_duration += result.get('duration_minutes', 0)
+            total_size_mb += result.get('total_size_mb', 0)
+        
+        # Create summary
+        year_range = config.get('year_range')
+        month_range = config.get('month_range')
+        
+        if year_range and month_range:
+            range_desc = f"Anos {year_range[0]}-{year_range[1]}, Meses {month_range[0]}-{month_range[1]}"
+        elif year_range:
+            range_desc = f"Anos {year_range[0]}-{year_range[1]}"
+        elif month_range:
+            range_desc = f"Ano {config['year']}, Meses {month_range[0]}-{month_range[1]}"
+        else:
+            range_desc = "Intervalo personalizado"
+        
+        consolidated_result = {
+            'success': len(all_files) > 0,
+            'files_downloaded': all_files,
+            'total_files': total_files,
+            'duration_minutes': total_duration,
+            'total_size_mb': total_size_mb,
+            'download_path': "downloads/raw/portal_saude_mg",
+            'errors': all_errors,
+            'periods_processed': periods_processed,
+            'range_description': range_desc,
+            'summary': f"Processado {range_desc} - Total: {len(all_files)} arquivos ({total_size_mb:.1f} MB)"
+        }
+        
+        return consolidated_result
+
+    def process_all_years(self, scraper, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Process all available years, cycling through each year and month."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        
+        print("\nIniciando busca em todos os anos (2000 até atual)...")
+        all_year_results = []
+        total_files_found = 0
+        years_processed = 0
+        years_with_data = []
+        
+        # Começar do ano atual e voltar no tempo (mais eficiente)
+        for year in range(current_year, 1999, -1):
+            ano = str(year)
+            print(f"\n=== PROCESSANDO ANO {year} ===")
+            
+            try:
+                if config.get('month') == 13:  # Todos os meses para este ano
+                    year_result = self.process_all_months_for_year(scraper, ano)
+                else:
+                    # Mês específico para este ano
+                    mes = f"{config['month']:02d}" if config.get('month') else None
+                    year_result = scraper.execute_scraping(ano, mes)
+                
+                files_in_year = len(year_result.get('files_downloaded', []))
+                
+                if files_in_year > 0:
+                    print(f"   ✅ Ano {year}: {files_in_year} arquivos encontrados")
+                    all_year_results.append(year_result)
+                    total_files_found += files_in_year
+                    years_processed += 1
+                    years_with_data.append(year)
+                else:
+                    print(f"   ⚪ Ano {year}: Nenhum arquivo encontrado")
+                    
+                    # Se não encontrar dados por 3 anos consecutivos, parar
+                    if len(years_with_data) > 0 and (years_with_data[-1] - year) > 3:
+                        print(f"   🛑 Sem dados por mais de 3 anos consecutivos - parando busca")
+                        break
+                        
+            except Exception as e:
+                print(f"   ❌ Erro no ano {year}: {str(e)}")
+                continue
+        
+        # Consolidar resultados de todos os anos
+        return self.consolidate_yearly_results(all_year_results, years_processed, total_files_found, years_with_data)
+    
+    def process_all_months_for_year(self, scraper, ano: str) -> Dict[str, Any]:
+        """Process all months for a specific year."""
+        all_results = []
+        total_files_found = 0
+        months_processed = 0
+        
+        month_names = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                     'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+        
+        for month_num in range(1, 13):  # Janeiro a dezembro
+            mes = f"{month_num:02d}"
+            month_name = month_names[month_num - 1]
+            
+            print(f"   [{month_num}/12] Processando {month_name} ({mes}/{ano})...")
+            
+            try:
+                result = scraper.execute_scraping(ano, mes)
+                
+                # Parar se não houver links (provável mês futuro)
+                if result.get('total_files', 0) == 0:
+                    print(f"      Nenhum resultado encontrado para {month_name} - parando meses")
+                    break
+                
+                files_count = len(result.get('files_downloaded', []))
+                print(f"      ✅ {month_name}: {files_count} arquivos baixados")
+                
+                all_results.append(result)
+                total_files_found += files_count
+                months_processed += 1
+                
+            except Exception as e:
+                print(f"      ❌ Erro em {month_name}: {str(e)}")
+                continue
+        
+        # Consolidar resultados de todos os meses para este ano
+        return self.consolidate_monthly_results(all_results, ano, months_processed, total_files_found)
+    
+    def consolidate_yearly_results(self, yearly_results: List[Dict[str, Any]], years_processed: int, total_files: int, years_with_data: List[int]) -> Dict[str, Any]:
+        """Consolidate results from multiple years."""
+        if not yearly_results:
+            return {
+                'success': False,
+                'files_downloaded': [],
+                'total_files': 0,
+                'errors': ['Nenhum ano processado com sucesso'],
+                'years_processed': 0
+            }
+        
+        # Consolidar arquivos de todos os anos
+        all_files = []
+        all_errors = []
+        total_duration = 0
+        total_size_mb = 0
+        
+        for result in yearly_results:
+            all_files.extend(result.get('files_downloaded', []))
+            all_errors.extend(result.get('errors', []))
+            total_duration += result.get('duration_minutes', 0)
+            total_size_mb += result.get('total_size_mb', 0)
+        
+        years_range = f"{min(years_with_data)}-{max(years_with_data)}" if years_with_data else "N/A"
+        
+        consolidated_result = {
+            'success': len(all_files) > 0,
+            'files_downloaded': all_files,
+            'total_files': total_files,
+            'duration_minutes': total_duration,
+            'total_size_mb': total_size_mb,
+            'download_path': "downloads/raw/portal_saude_mg",
+            'errors': all_errors,
+            'years_processed': years_processed,
+            'years_with_data': years_with_data,
+            'summary': f"Processados {years_processed} anos ({years_range}) - Total: {len(all_files)} arquivos ({total_size_mb:.1f} MB)"
+        }
+        
+        return consolidated_result
+    
+    def consolidate_monthly_results(self, monthly_results: List[Dict[str, Any]], ano: str, months_processed: int, total_files: int) -> Dict[str, Any]:
+        """Consolidate results from multiple months into a single result."""
+        if not monthly_results:
+            return {
+                'success': False,
+                'files_downloaded': [],
+                'total_files': 0,
+                'errors': ['Nenhum mês processado com sucesso'],
+                'months_processed': 0
+            }
+        
+        # Consolidar arquivos de todos os meses
+        all_files = []
+        all_errors = []
+        total_duration = 0
+        total_size_mb = 0
+        
+        for result in monthly_results:
+            all_files.extend(result.get('files_downloaded', []))
+            all_errors.extend(result.get('errors', []))
+            total_duration += result.get('duration_minutes', 0)
+            total_size_mb += result.get('total_size_mb', 0)
+        
+        # Resultado consolidado
+        consolidated_result = {
+            'success': len(all_files) > 0,
+            'files_downloaded': all_files,
+            'total_files': total_files,
+            'duration_minutes': total_duration,
+            'total_size_mb': total_size_mb,
+            'download_path': f"downloads/raw/portal_saude_mg/{ano}",
+            'errors': all_errors,
+            'months_processed': months_processed,
+            'summary': f"Processados {months_processed} meses de {ano} - Total: {len(all_files)} arquivos ({total_size_mb:.1f} MB)"
+        }
+        
+        return consolidated_result
+    
     def format_config_summary(self, config: Dict[str, Any]) -> str:
         """Format configuration summary for display."""
         parts = []
         
-        if 'year' in config:
-            parts.append(f"Ano: {config['year']}")
+        # Handle year or year range
+        if config.get('year_range'):
+            start_year, end_year = config['year_range']
+            parts.append(f"Ano: {start_year}-{end_year}")
+        elif 'year' in config:
+            if config['year'] == 999:
+                parts.append("Ano: Todos")
+            elif config['year'] == 998:
+                parts.append("Ano: Intervalo personalizado")
+            else:
+                parts.append(f"Ano: {config['year']}")
         
-        if 'month' in config and config['month'] != 13:
+        # Handle month or month range
+        if config.get('month_range'):
+            start_month, end_month = config['month_range']
             months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
                      'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-            if 1 <= config['month'] <= 12:
+            start_name = months[start_month - 1]
+            end_name = months[end_month - 1]
+            parts.append(f"Mes: {start_name}-{end_name}")
+        elif 'month' in config:
+            if config['month'] == 13:
+                parts.append("Mes: Todos")
+            elif config['month'] == 14:
+                parts.append("Mes: Intervalo personalizado")
+            elif 1 <= config['month'] <= 12:
+                months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
                 parts.append(f"Mes: {months[config['month']-1]}")
-        elif config.get('month') == 13:
-            parts.append("Mes: Todos")
         
         if 'municipality' in config:
             if config['municipality'] == 'ALL_MG':
