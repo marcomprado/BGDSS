@@ -17,7 +17,6 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
@@ -44,7 +43,7 @@ class PortalSaudeMGScraper:
         
     def execute_scraping(self, ano: str, mes: str = None) -> Dict[str, Any]:
         """
-        Execute scraping following exact Portal Saude MG specifications with crash recovery.
+        Execute scraping for Portal Saude MG.
         
         Args:
             ano: String with year (ex: "2024")
@@ -53,149 +52,102 @@ class PortalSaudeMGScraper:
         Returns:
             Dict with success status, files downloaded, total files, and errors
         """
-        max_retries = 3
-        retry_count = 0
         
-        while retry_count < max_retries:
-            start_time = datetime.now()
-            downloaded_files = []
-            errors = []
+        start_time = datetime.now()
+        downloaded_files = []
+        errors = []
+        
+        try:
+            self.session_start_time = datetime.now()
+            logger.info(f"Starting Portal Saude MG scraping - Ano: {ano}, Mes: {mes or 'todos'}")
             
-            try:
-                self.session_start_time = datetime.now()
-                logger.info(f"Starting Portal Saude MG scraping - Ano: {ano}, Mes: {mes or 'todos'} (Tentativa {retry_count + 1}/{max_retries})")
-                self._log_system_resources("session_start")
+            # 1. Initialize browser and navigate to initial page
+            operation_start = self._start_operation_timer("browser_init")
+            self._initialize_browser(ano, mes)
+            self._end_operation_timer("browser_init", operation_start)
+            
+            # Navigate to base URL with retry logic
+            operation_start = self._start_operation_timer("navigation")
+            navigation_success = self._navigate_with_retry()
+            self._end_operation_timer("navigation", operation_start)
+            if not navigation_success:
+                raise Exception("Falha na navegação para a página inicial")
+            
+            # 2. Fill search filters
+            operation_start = self._start_operation_timer("fill_filters")
+            logger.info("Preenchendo filtros de busca")
+            self._fill_year_filter(ano)
+            if mes:
+                self._fill_month_filter(mes)
+            self._end_operation_timer("fill_filters", operation_start)
+            
+            # 3. Execute search
+            operation_start = self._start_operation_timer("execute_search")
+            logger.info("Executando busca")
+            self._execute_search()
+            self._end_operation_timer("execute_search", operation_start)
+            
+            # 4. Load all results (infinite scroll)
+            operation_start = self._start_operation_timer("load_results")
+            logger.info("Carregando todos os resultados com scroll infinito")
+            self._load_all_results()
+            self._end_operation_timer("load_results", operation_start)
+            
+            # 5. Collect all PDF links
+            operation_start = self._start_operation_timer("collect_links")
+            logger.info("Coletando todos os links de PDFs")
+            pdf_links = self._collect_pdf_links()
+            self._end_operation_timer("collect_links", operation_start)
+            logger.info(f"Encontrados {len(pdf_links)} links de PDFs")
+            
+            # 6. Download all PDFs
+            if pdf_links:
+                operation_start = self._start_operation_timer("download_pdfs")
+                downloaded_files = self._download_all_pdfs(pdf_links, ano, mes)
+                self._end_operation_timer("download_pdfs", operation_start)
+            
+            # 7. Calculate results
+            duration = (datetime.now() - start_time).total_seconds() / 60
+            total_size_mb = sum(os.path.getsize(f) for f in downloaded_files if os.path.exists(f)) / (1024 * 1024)
+            
+            result = {
+                "success": True,
+                "files_downloaded": downloaded_files,
+                "total_files": len(pdf_links),
+                "duration_minutes": duration,
+                "download_path": str(self._get_download_path(ano, mes)),
+                "total_size_mb": total_size_mb,
+                "errors": errors
+            }
                 
-                # 1. Initialize browser and navigate to initial page
-                operation_start = self._start_operation_timer("browser_init")
-                self._initialize_browser(ano, mes)
-                self._end_operation_timer("browser_init", operation_start)
-                
-                # Navigate to base URL with retry logic
-                operation_start = self._start_operation_timer("navigation")
-                navigation_success = self._navigate_with_retry()
-                self._end_operation_timer("navigation", operation_start)
-                if not navigation_success:
-                    raise Exception("Falha na navegação para a página inicial após múltiplas tentativas")
-                
-                # 2. Fill search filters with crash detection
-                operation_start = self._start_operation_timer("fill_filters")
-                logger.info("Preenchendo filtros de busca")
-                self._fill_year_filter(ano)
-                if mes:
-                    self._fill_month_filter(mes)
-                # Note: Search term 'reso' is already included in base URL, no need to fill
-                self._end_operation_timer("fill_filters", operation_start)
-                
-                # 4. Execute search with enhanced monitoring
-                operation_start = self._start_operation_timer("execute_search")
-                logger.info("Executando busca")
-                self._execute_search_with_monitoring()
-                self._end_operation_timer("execute_search", operation_start)
-                
-                # 5. Load all results (infinite scroll) with crash detection
-                operation_start = self._start_operation_timer("load_results")
-                logger.info("Carregando todos os resultados com scroll infinito")
-                self._load_all_results_with_monitoring()
-                self._end_operation_timer("load_results", operation_start)
-                self._log_system_resources("after_scroll")
-                
-                # 6. Collect all PDF links
-                operation_start = self._start_operation_timer("collect_links")
-                logger.info("Coletando todos os links de PDFs")
-                pdf_links = self._collect_pdf_links()
-                self._end_operation_timer("collect_links", operation_start)
-                logger.info(f"Encontrados {len(pdf_links)} links de PDFs")
-                
-                # 7. Download all PDFs
-                if pdf_links:
-                    operation_start = self._start_operation_timer("download_pdfs")
-                    downloaded_files = self._download_all_pdfs(pdf_links, ano, mes)
-                    self._end_operation_timer("download_pdfs", operation_start)
-                
-                # 8. Calculate results
-                duration = (datetime.now() - start_time).total_seconds() / 60
-                total_size_mb = sum(os.path.getsize(f) for f in downloaded_files if os.path.exists(f)) / (1024 * 1024)
-                
-                result = {
-                    "success": True,
-                    "files_downloaded": downloaded_files,
-                    "total_files": len(pdf_links),
-                    "duration_minutes": duration,
-                    "download_path": str(self._get_download_path(ano, mes)),
-                    "total_size_mb": total_size_mb,
-                    "errors": errors,
-                    "retry_count": retry_count
-                }
-                
-                # Log final session statistics
-                self._log_session_summary(result, pdf_links)
-                logger.info(f"Scraping concluído com sucesso: {len(downloaded_files)} arquivos baixados")
-                return result
-                
-            except Exception as e:
-                error_msg = f"Erro durante scraping (tentativa {retry_count + 1}): {str(e)}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-                
-                # Take screenshot on error if possible
-                self._take_error_screenshot()
-                
-                # Check if this looks like a browser crash
-                is_browser_crash = self._detect_browser_crash(e)
-                
-                if is_browser_crash and retry_count < max_retries - 1:
-                    logger.warning(f"Browser crash detectado, reiniciando para tentativa {retry_count + 2}")
-                    self._force_cleanup()
-                    time.sleep(5)  # Wait before retry
-                    retry_count += 1
-                    continue
-                else:
-                    # Final failure or non-crash error
-                    return {
-                        "success": False,
-                        "files_downloaded": downloaded_files,
-                        "total_files": 0,
-                        "errors": errors,
-                        "retry_count": retry_count
-                    }
-                    
-            finally:
-                self._cleanup()
-        
-        # If we get here, all retries failed
-        return {
-            "success": False,
-            "files_downloaded": [],
-            "total_files": 0,
-            "errors": ["Todas as tentativas falharam após detecção de crashes"],
-            "retry_count": max_retries
-        }
+            logger.info(f"Scraping concluído com sucesso: {len(downloaded_files)} arquivos baixados")
+            return result
+            
+        except Exception as e:
+            error_msg = f"Erro durante scraping: {str(e)}"
+            logger.error(error_msg)
+            errors.append(error_msg)
+            
+            return {
+                "success": False,
+                "files_downloaded": downloaded_files,
+                "total_files": 0,
+                "errors": errors
+            }
+            
+        finally:
+            self._cleanup()
     
     def _navigate_with_retry(self) -> bool:
-        """Navigate to base URL with retry logic"""
-        for attempt in range(3):
-            try:
-                logger.info(f"Navegando para a página inicial (tentativa {attempt + 1}/3)")
-                self.driver.get(self.base_url)
-                self._wait_for_page_load()
-                
-                # Verify page loaded correctly
-                if self._verify_page_loaded():
-                    return True
-                else:
-                    logger.warning("Página não carregou corretamente")
-                    if attempt < 2:
-                        time.sleep(3)
-                        continue
-                        
-            except Exception as e:
-                logger.warning(f"Erro na navegação (tentativa {attempt + 1}): {e}")
-                if attempt < 2:
-                    time.sleep(3)
-                    continue
-                    
-        return False
+        """Navigate to base URL"""
+        try:
+            logger.info("Navegando para a página inicial")
+            self.driver.get(self.base_url)
+            self._wait_for_page_load()
+            return self._verify_page_loaded()
+        except Exception as e:
+            logger.error(f"Erro na navegação: {e}")
+            return False
     
     def _verify_page_loaded(self) -> bool:
         """Verify that the page loaded correctly"""
@@ -215,122 +167,10 @@ class PortalSaudeMGScraper:
             logger.warning(f"Erro na verificação da página: {e}")
             return False
     
-    def _execute_search_with_monitoring(self):
-        """Execute search with browser monitoring"""
-        try:
-            # Monitor browser health before search
-            if not self._check_browser_health():
-                raise Exception("Browser não está respondendo antes da busca")
-            
-            self._execute_search()
-            
-            # Monitor browser health after search
-            if not self._check_browser_health():
-                raise Exception("Browser parou de responder após a busca")
-                
-        except Exception as e:
-            logger.error(f"Erro na busca com monitoramento: {e}")
-            raise
     
-    def _load_all_results_with_monitoring(self):
-        """Load all results with enhanced monitoring"""
-        try:
-            # Check browser health before starting scroll
-            if not self._check_browser_health():
-                raise Exception("Browser não está respondendo antes do scroll")
-            
-            self._load_all_results()
-            
-            # Final health check
-            if not self._check_browser_health():
-                logger.warning("Browser não está respondendo após scroll, mas continuando...")
-                
-        except Exception as e:
-            logger.error(f"Erro no scroll com monitoramento: {e}")
-            raise
     
-    def _check_browser_health(self) -> bool:
-        """Check if browser is still responsive"""
-        try:
-            if not self.driver:
-                return False
-            
-            # Try a simple JavaScript execution
-            result = self.driver.execute_script("return 'alive';")
-            
-            # Check current URL
-            current_url = self.driver.current_url
-            
-            if result == 'alive' and current_url:
-                return True
-            else:
-                logger.warning("Browser health check failed - não responsivo")
-                return False
-                
-        except Exception as e:
-            logger.warning(f"Browser health check failed: {e}")
-            return False
     
-    def _detect_browser_crash(self, exception: Exception) -> bool:
-        """Detect if an exception indicates a browser crash"""
-        error_str = str(exception).lower()
-        crash_indicators = [
-            'chrome not reachable',
-            'session deleted',
-            'session not created',
-            'connection refused',
-            'connection reset',
-            'chrome crashed',
-            'chromedriver crashed',
-            'segmentation fault',
-            'chrome failed to start',
-            'browser has been closed',
-            'no such session',
-            'invalid session id'
-        ]
-        
-        for indicator in crash_indicators:
-            if indicator in error_str:
-                logger.info(f"Crash detectado por indicador: {indicator}")
-                return True
-        
-        # Also check if driver is no longer accessible
-        try:
-            if self.driver:
-                self.driver.current_url
-        except:
-            logger.info("Crash detectado - driver não acessível")
-            return True
-            
-        return False
     
-    def _force_cleanup(self):
-        """Force cleanup of browser resources"""
-        try:
-            if self.driver:
-                try:
-                    self.driver.quit()
-                except:
-                    pass  # Ignore errors during forced cleanup
-            self.driver = None
-            
-            # Additional cleanup - kill any remaining chrome processes
-            import subprocess
-            import platform
-            
-            try:
-                if platform.system() == "Darwin":  # macOS
-                    subprocess.run(["pkill", "-f", "chrome"], capture_output=True)
-                elif platform.system() == "Linux":
-                    subprocess.run(["pkill", "-f", "chrome"], capture_output=True)
-                # Windows cleanup would go here if needed
-            except:
-                pass  # Ignore errors in process cleanup
-                
-            logger.info("Force cleanup executado")
-            
-        except Exception as e:
-            logger.debug(f"Erro durante force cleanup: {e}")
     
     def _initialize_browser(self, ano: str, mes: str = None):
         """Initialize browser with proper configurations"""
@@ -442,334 +282,96 @@ class PortalSaudeMGScraper:
     #     # This method is no longer used - search term is already in the URL
     
     def _execute_search(self):
-        """Execute search by submitting the form (filters already applied, search term in URL)"""
-        search_strategies = [
-            ('form_submit', self._search_with_form_submit_simple),
-            ('submit_button', self._search_with_submit_button),
-            ('javascript', self._search_with_javascript_simple)
-        ]
+        """Execute search - since filters are applied via URL, just wait for page to load"""
+        logger.info("Aguardando carregamento da página com filtros aplicados")
         
-        for strategy_name, strategy_func in search_strategies:
-            try:
-                logger.info(f"Tentando estratégia de busca: {strategy_name}")
-                success = strategy_func()
-                if success:
-                    logger.info(f"Busca executada com sucesso usando: {strategy_name}")
-                    # Wait for search results with multiple validation checks
-                    if self._wait_for_search_results():
-                        return
-                    else:
-                        logger.warning(f"Estratégia {strategy_name} executou mas não carregou resultados")
-                        continue
-                else:
-                    logger.warning(f"Estratégia {strategy_name} falhou")
-                    continue
-                    
-            except Exception as e:
-                logger.warning(f"Estratégia {strategy_name} gerou erro: {e}")
-                continue
+        # Simply wait for the page to load with applied filters
+        if self._wait_for_search_results():
+            logger.info("Página carregada com sucesso")
+            return
         
-        # If all strategies failed, take screenshot and raise error
-        self._take_error_screenshot()
-        raise Exception("Todas as estratégias de busca falharam")
+        raise Exception("Falha ao carregar página com filtros")
     
-    def _search_with_enter(self) -> bool:
-        """Execute search using Enter key"""
-        try:
-            search_input = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="q"]'))
-            )
-            search_input.send_keys(Keys.RETURN)
-            time.sleep(2)  # Give time for submission
-            return True
-        except Exception as e:
-            logger.debug(f"Enter key strategy failed: {e}")
-            return False
     
-    def _search_with_submit_button(self) -> bool:
-        """Execute search using submit button"""
-        try:
-            submit_button = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[type="submit"], button[type="submit"]'))
-            )
-            submit_button.click()
-            time.sleep(2)
-            return True
-        except Exception as e:
-            logger.debug(f"Submit button strategy failed: {e}")
-            return False
     
-    def _search_with_form_submit(self) -> bool:
-        """Execute search by submitting the form"""
-        try:
-            search_input = self.driver.find_element(By.CSS_SELECTOR, 'input[name="q"]')
-            form = search_input.find_element(By.XPATH, './ancestor::form')
-            form.submit()
-            time.sleep(2)
-            return True
-        except Exception as e:
-            logger.debug(f"Form submit strategy failed: {e}")
-            return False
     
-    def _search_with_javascript(self) -> bool:
-        """Execute search using JavaScript"""
-        try:
-            self.driver.execute_script("""
-                var form = document.querySelector('input[name="q"]').closest('form');
-                if (form) {
-                    form.submit();
-                    return true;
-                }
-                return false;
-            """)
-            time.sleep(2)
-            return True
-        except Exception as e:
-            logger.debug(f"JavaScript strategy failed: {e}")
-            return False
     
-    def _search_with_form_submit_simple(self) -> bool:
-        """Execute search by finding and submitting the form directly (avoiding stale elements)"""
-        try:
-            # Find form by class or general form selector, avoiding specific input elements
-            forms = self.driver.find_elements(By.TAG_NAME, 'form')
-            for form in forms:
-                try:
-                    # Try to find a form that contains year/month selectors (our target form)
-                    year_select = form.find_elements(By.CSS_SELECTOR, 'select[name="by_year"]')
-                    if year_select:
-                        logger.debug("Found form with year selector, submitting")
-                        form.submit()
-                        time.sleep(3)
-                        return True
-                except:
-                    continue
-            
-            logger.debug("No suitable form found")
-            return False
-        except Exception as e:
-            logger.debug(f"Form submit simple strategy failed: {e}")
-            return False
     
-    def _search_with_javascript_simple(self) -> bool:
-        """Execute search using JavaScript to find form without touching search input"""
-        try:
-            result = self.driver.execute_script("""
-                // Find form containing year selector instead of search input
-                var yearSelect = document.querySelector('select[name="by_year"]');
-                if (yearSelect) {
-                    var form = yearSelect.closest('form');
-                    if (form) {
-                        form.submit();
-                        return true;
-                    }
-                }
-                return false;
-            """)
-            
-            if result:
-                time.sleep(3)
-                return True
-            else:
-                return False
-        except Exception as e:
-            logger.debug(f"JavaScript simple strategy failed: {e}")
-            return False
     
     def _wait_for_search_results(self) -> bool:
-        """Wait for search results to appear with multiple validation methods"""
+        """Wait for search results to appear"""
         try:
-            # Strategy 1: Wait for results container
-            try:
-                WebDriverWait(self.driver, 15).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "h2.title, .search-results, .results"))
-                )
-                logger.debug("Resultados detectados por container")
-                time.sleep(3)  # Additional wait for dynamic content
-                return True
-            except TimeoutException:
-                logger.debug("Container de resultados não encontrado")
+            # Wait for results to load
+            WebDriverWait(self.driver, 15).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "h2.title > a"))
+            )
+            logger.debug("Resultados carregados")
+            time.sleep(2)  # Short wait for stabilization
+            return True
             
-            # Strategy 2: Wait for specific content elements
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "h2.title > a"))
-                )
-                logger.debug("Links de resultados detectados")
-                time.sleep(3)
-                return True
-            except TimeoutException:
-                logger.debug("Links de resultados não encontrados")
-            
-            # Strategy 3: Check for page change or new content
-            try:
-                # Wait for page to stabilize
-                WebDriverWait(self.driver, 10).until(
-                    lambda driver: driver.execute_script("return document.readyState") == "complete"
-                )
-                
-                # Check if URL changed (indicating search was processed)
-                current_url = self.driver.current_url
-                if "q=" in current_url or "search" in current_url.lower():
-                    logger.debug("URL indica que busca foi processada")
-                    time.sleep(5)  # Longer wait for results to populate
-                    return True
-                    
-            except TimeoutException:
-                logger.debug("Página não estabilizou")
-            
+        except TimeoutException:
+            logger.warning("Timeout ao aguardar resultados")
             return False
-            
         except Exception as e:
-            logger.error(f"Erro ao aguardar resultados da busca: {e}")
+            logger.error(f"Erro ao aguardar resultados: {e}")
             return False
     
     def _load_all_results(self):
-        """Load all results using optimized infinite scroll with timeout protection"""
-        try:
-            logger.info("Iniciando scroll infinito para carregar todos os resultados")
+        """Load all results using fast infinite scroll"""
+        logger.info("Iniciando scroll infinito otimizado")
+        
+        scroll_count = 0
+        max_scrolls = 50
+        consecutive_no_content = 0
+        scroll_start_time = time.time()
+        
+        initial_content = self._count_current_results()
+        logger.info(f"Conteúdo inicial: {initial_content} itens")
+        
+        while scroll_count < max_scrolls:
+            # Quick timeout check (2 minutes max)
+            if time.time() - scroll_start_time > 120:
+                logger.info("Timeout de 2 minutos atingido - finalizando")
+                break
             
-            scroll_count = 0
-            max_scrolls = 50  # Reduced safety limit
-            consecutive_no_content = 0  # Track consecutive scrolls without new content
-            stable_content_checks = 0
-            max_scroll_time = 300  # 5 minutes maximum scroll time
-            scroll_start_time = time.time()
+            # Simple end detection
+            if self._is_at_page_bottom():
+                logger.info("Final da página atingido")
+                break
             
-            # Pre-scroll validation - ensure we have initial content
-            initial_content = self._count_current_results()
-            if initial_content == 0:
-                logger.warning("Nenhum conteúdo inicial detectado antes do scroll")
-                time.sleep(2)  # Reduced from 5 to 2 seconds
-                initial_content = self._count_current_results()
-                
-            logger.info(f"Conteúdo inicial detectado: {initial_content} itens")
+            current_count = self._count_current_results()
             
-            while scroll_count < max_scrolls:
-                # Check timeout
-                elapsed_time = time.time() - scroll_start_time
-                if elapsed_time > max_scroll_time:
-                    logger.warning(f"Timeout de scroll atingido ({max_scroll_time}s) - parando")
+            # Fast scroll
+            self.driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(0.8)  # Much faster wait
+            
+            new_count = self._count_current_results()
+            
+            if new_count > current_count:
+                logger.debug(f"Novo conteúdo: +{new_count - current_count} (total: {new_count})")
+                consecutive_no_content = 0
+            else:
+                consecutive_no_content += 1
+                if consecutive_no_content >= 3:  # Quick exit after 3 failed attempts
+                    logger.info("Nenhum conteúdo novo por 3 scrolls - finalizando")
                     break
-                
-                # Memory cleanup and health check every 15 scrolls
-                if scroll_count > 0 and scroll_count % 15 == 0:
-                    self._cleanup_browser_memory()
-                    if not self._check_browser_health():
-                        logger.warning("Browser não está saudável durante scroll - parando")
-                        break
-                
-                # Multi-method end detection
-                if self._check_end_of_content():
-                    logger.info("Fim do conteúdo detectado - scroll infinito concluído")
-                    break
-                
-                # Get current content count before scrolling
-                current_content_count = self._count_current_results()
-                
-                # Perform safer scrolling
-                scroll_success = self._perform_safe_scroll()
-                if not scroll_success:
-                    logger.warning("Scroll falhou, tentando métodos alternativos")
-                    if not self._alternative_scroll_methods():
-                        logger.error("Todos os métodos de scroll falharam")
-                        break
-                
-                # Optimized wait time - much faster
-                wait_time = min(1 + (scroll_count // 20), 3)  # 1-3 seconds instead of 3-8
-                logger.debug(f"Aguardando {wait_time}s para novo conteúdo...")
-                time.sleep(wait_time)
-                
-                # Check if new content was loaded
-                new_content_count = self._count_current_results()
-                
-                if new_content_count > current_content_count:
-                    logger.info(f"✅ Novo conteúdo: {new_content_count - current_content_count} itens (total: {new_content_count})")
-                    consecutive_no_content = 0
-                    stable_content_checks = 0
-                elif new_content_count == current_content_count:
-                    consecutive_no_content += 1
-                    logger.info(f"⏸️  Nenhum novo conteúdo ({consecutive_no_content} scrolls consecutivos)")
-                    
-                    # Reduced from 5 to 3 consecutive no-content scrolls
-                    if consecutive_no_content >= 3:
-                        stable_content_checks += 1
-                        logger.info(f"🔍 Conteúdo estável por {consecutive_no_content} scrolls - verificação {stable_content_checks}")
-                        
-                        # Reduced from 3 to 2 stable checks
-                        if stable_content_checks >= 2:
-                            logger.info("✅ Fim do conteúdo assumido - parando scroll")
-                            break
-                
-                scroll_count += 1
-                
-                # More frequent progress reporting
-                if scroll_count % 3 == 0:  # Every 3 scrolls instead of 5
-                    elapsed = time.time() - scroll_start_time
-                    logger.info(f"📊 Scroll #{scroll_count}: {new_content_count} itens ({elapsed:.1f}s decorridos)")
             
-            # Final validation
-            final_content_count = self._count_current_results()
+            scroll_count += 1
             
-            if scroll_count >= max_scrolls:
-                logger.warning(f"Limite máximo de scrolls ({max_scrolls}) atingido")
-            
-            logger.info(f"Scroll infinito concluído: {scroll_count} scrolls, {final_content_count} itens carregados")
-            
-        except Exception as e:
-            error_msg = f"Erro durante scroll infinito: {str(e)}"
-            logger.error(error_msg)
-            self._take_error_screenshot()
-            # Continue anyway - we may have loaded some content
+            if scroll_count % 10 == 0:
+                elapsed = time.time() - scroll_start_time
+                logger.info(f"Scroll #{scroll_count}: {new_count} itens ({elapsed:.1f}s)")
+        
+        final_count = self._count_current_results()
+        logger.info(f"Scroll concluído: {final_count} itens em {scroll_count} scrolls")
     
-    def _check_end_of_content(self) -> bool:
-        """Check for end of content using multiple detection methods"""
+    def _is_at_page_bottom(self) -> bool:
+        """Simple check if we're at the bottom of the page"""
         try:
-            logger.debug("🔍 Verificando fim do conteúdo...")
-            
-            # Method 1: Official end message
-            try:
-                end_elements = self.driver.find_elements(By.CSS_SELECTOR, 'div.no-items, .no-content, .end-of-results')
-                logger.debug(f"Encontrados {len(end_elements)} elementos de fim potenciais")
-                
-                for element in end_elements:
-                    if element.is_displayed():
-                        element_text = element.text.lower()
-                        logger.debug(f"Texto do elemento: '{element_text}'")
-                        if any(phrase in element_text for phrase in 
-                            ["não há mais conteúdo", "no more content", "fim dos resultados", "end of results"]):
-                            logger.info("✅ Mensagem oficial de fim detectada")
-                            return True
-            except Exception as e:
-                logger.debug(f"Erro ao verificar mensagem de fim: {e}")
-            
-            # Method 2: Check if we can't scroll anymore
-            try:
-                current_height = self.driver.execute_script("return document.body.scrollHeight")
-                current_position = self.driver.execute_script("return window.pageYOffset + window.innerHeight")
-                
-                logger.debug(f"Altura da página: {current_height}px, Posição atual: {current_position}px")
-                
-                if current_position >= current_height - 100:  # Close to bottom
-                    logger.info("✅ Próximo ao final da página - fim do scroll")
-                    return True
-            except Exception as e:
-                logger.debug(f"Erro ao verificar altura da página: {e}")
-            
-            # Method 3: Look for pagination indicators showing we're at the end
-            try:
-                pagination_elements = self.driver.find_elements(By.CSS_SELECTOR, '.pagination, .pager, .page-nav')
-                for element in pagination_elements:
-                    if "última" in element.text.lower() or "last" in element.text.lower():
-                        logger.debug("Indicador de última página detectado")
-                        return True
-            except:
-                pass
-            
-            return False
-            
-        except Exception as e:
-            logger.debug(f"Erro na detecção de fim: {e}")
+            current_height = self.driver.execute_script("return document.body.scrollHeight")
+            current_position = self.driver.execute_script("return window.pageYOffset + window.innerHeight")
+            return current_position >= current_height - 200
+        except:
             return False
     
     def _count_current_results(self) -> int:
@@ -786,87 +388,13 @@ class PortalSaudeMGScraper:
             except:
                 return 0
     
-    def _perform_safe_scroll(self) -> bool:
-        """Perform safe scrolling with error handling"""
-        try:
-            # Method 1: Smooth scroll
-            self.driver.execute_script("""
-                window.scrollBy({
-                    top: 300,
-                    left: 0,
-                    behavior: 'smooth'
-                });
-            """)
-            return True
-        except:
-            try:
-                # Method 2: Direct scroll
-                self.driver.execute_script("window.scrollBy(0, 300);")
-                return True
-            except:
-                return False
     
-    def _alternative_scroll_methods(self) -> bool:
-        """Try alternative scrolling methods if main method fails"""
-        try:
-            # Method 1: Scroll to element
-            try:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, "h2.title")
-                if elements:
-                    last_element = elements[-1]
-                    self.driver.execute_script("arguments[0].scrollIntoView();", last_element)
-                    return True
-            except:
-                pass
-            
-            # Method 2: Page Down key
-            try:
-                from selenium.webdriver.common.keys import Keys
-                body = self.driver.find_element(By.TAG_NAME, "body")
-                body.send_keys(Keys.PAGE_DOWN)
-                return True
-            except:
-                pass
-            
-            # Method 3: End key
-            try:
-                body = self.driver.find_element(By.TAG_NAME, "body")
-                body.send_keys(Keys.END)
-                return True
-            except:
-                pass
-            
-            return False
-            
-        except Exception as e:
-            logger.debug(f"Métodos alternativos de scroll falharam: {e}")
-            return False
     
-    def _cleanup_browser_memory(self):
-        """Perform browser memory cleanup"""
-        try:
-            # Clear browser cache and run garbage collection
-            self.driver.execute_script("""
-                if (window.gc) {
-                    window.gc();
-                }
-                // Clear some browser caches
-                if ('caches' in window) {
-                    caches.keys().then(function(names) {
-                        names.forEach(function(name) {
-                            caches.delete(name);
-                        });
-                    });
-                }
-            """)
-            logger.debug("Limpeza de memória do browser executada")
-        except Exception as e:
-            logger.debug(f"Falha na limpeza de memória: {e}")
     
     def _collect_pdf_links(self) -> List[Dict[str, str]]:
-        """Collect all PDF links using exact selector: h2.title > a, filtering for 'RESOLUÇÃO SES'"""
+        """Collect all PDF links using exact selector: h2.title > a"""
         try:
-            logger.info("Coletando links de PDFs com seletor h2.title > a")
+            logger.info("Coletando todos os links de documentos")
             
             # Find all title links
             title_links = self.driver.find_elements(By.CSS_SELECTOR, "h2.title > a")
@@ -878,8 +406,8 @@ class PortalSaudeMGScraper:
                     href = link.get_attribute("href")
                     text = link.text.strip()
                     
-                    # Filter only links containing "RESOLUÇÃO SES"
-                    if href and "RESOLUÇÃO SES" in text.upper():
+                    # Collect all links with valid href (no name filtering)
+                    if href and text:
                         pdf_links.append({
                             'url': href,
                             'title': text,
@@ -899,7 +427,7 @@ class PortalSaudeMGScraper:
                     seen_urls.add(link['url'])
                     unique_links.append(link)
             
-            logger.info(f"Coletados {len(unique_links)} links únicos de PDFs com 'RESOLUÇÃO SES'")
+            logger.info(f"Coletados {len(unique_links)} links únicos de documentos")
             return unique_links
             
         except Exception as e:
