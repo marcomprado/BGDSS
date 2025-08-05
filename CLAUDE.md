@@ -17,12 +17,12 @@ pip install -r requirements.txt
 Install all required dependencies including Selenium, OpenAI, pandas, and web scraping libraries.
 
 ### Testing Individual Components
-```bash
-python test_filename_extraction.py
-```
-Tests the filename extraction logic for Portal Saude MG PDFs.
+Currently no active test files in the repository (test files have been removed from working directory).
 
-Note: The main test file `test_all_scrapers.py` has been deleted but was previously used for comprehensive scraper testing.
+**Development Testing Approach**:
+- Use `python main.py` and manually test specific site scrapers through the terminal interface
+- Check logs in `logs/` directory for debugging
+- Verify PDF processing with AI by checking `downloads/processed/` output
 
 ### Environment Setup
 - Copy `.env.example` to `.env` (if available) 
@@ -72,8 +72,9 @@ downloads/
 
 **Configuration Hierarchy**:
 1. Environment variables (.env file)
-2. Command line arguments (through terminal interface)
-3. Default values in `config/settings.py`
+2. Site-specific configuration in `config/sites_config.json`
+3. Command line arguments (through terminal interface)  
+4. Default values in `config/settings.py`
 
 ### WebDriver Configuration
 - Uses Selenium WebDriver with Chrome
@@ -90,19 +91,27 @@ downloads/
 ## Important Implementation Notes
 
 ### Site-Specific Behavior
-- **Portal Saude MG**: Direct HTTP access, no authentication required
-- **MDS Sites**: Require authentication for full data access (currently does interface analysis only)
+- **Portal Saude MG**: Direct HTTP access, downloads PDFs, full AI processing to Excel
+- **MDS Sites**: Require developing (currently does not exist)
 - All scrapers respect rate limiting and robots.txt guidelines
 
-### PDF Processing
-- PDFs are downloaded with intelligent filename extraction
-- Resolution numbers are parsed from document titles
-- Files organized by year/month structure automatically
+### Current File Status (Per Git)
+- Deleted files: `test_all_scrapers.py`, `update_pdf_compatibility.py`, `.DS_Store`, `dotenv.txt`, `src/ai/navigator_agent.py`
+- New files: `src/modules/pdf_processor.py` (untracked)
+- Modified files: Core scrapers, configuration, UI components
 
-### AI Integration (Optional)
-- OpenAI integration available but not required for core functionality
-- Used for enhanced content analysis when API key is provided
-- System degrades gracefully without AI features
+### PDF Processing
+- **PDF to Excel Conversion**: Core feature using `src/modules/pdf_processor.py` (recently added)
+- **AI-Powered Data Extraction**: Uses OpenAI API via `src/ai/pdf_call.py` and `src/ai/openai_client.py`
+- **Intelligent Filename Parsing**: Resolution numbers extracted from document titles  
+- **Excel Output**: Generated via `src/modules/pdf_data_to_table.py`
+- **Organized Storage**: Files structured by site/year/month in `downloads/` directory
+
+### AI Integration (Required for PDF Processing)
+- **OpenAI API**: Essential for PDF data extraction to Excel format
+- **Models Used**: GPT-4o-mini for cost-efficient text extraction
+- **PDF Analysis**: Converts unstructured PDF content to structured Excel data
+- **Graceful Degradation**: System works for basic scraping without AI, but PDF processing requires OpenAI API key
 
 ### Memory and Performance
 - Uses streaming downloads for large files
@@ -114,3 +123,4 @@ downloads/
 - Respects site terms of service and rate limits
 - Only accesses publicly available information
 - Implements proper delay between requests
+- Name of the project is BGDSS - Brazilian Government Data Scraping System
