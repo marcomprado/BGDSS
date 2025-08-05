@@ -425,11 +425,14 @@ class PortalSaudeUI:
                 result = scraper.execute_scraping(ano, mes)
             
             logger.info(f"Scraping finalizado: {result.get('success', False)}")
-            logger.end_session()
             
+            # Se scraping foi bem-sucedido, tentar processamento AI
             if result.get('success', False):
-                self.show_success_screen(result)
+                final_result = self.process_pdfs_with_ai(result, config)
+                logger.end_session()
+                self.show_success_screen(final_result)
             else:
+                logger.end_session()
                 self.show_error_screen(result)
                 
         except Exception as e:
@@ -443,6 +446,167 @@ class PortalSaudeUI:
                 'site': config['site']
             }
             self.show_error_screen(error_result)
+
+    def verify_ai_dependencies(self) -> Dict[str, Any]:
+        """Verifica se dependências AI estão disponíveis."""
+        try:
+            logger.info("Verificando dependências AI...")
+            
+            # Tentar importar e inicializar PDFProcessor
+            from src.ai.pdf_call import PDFProcessor
+            processor = PDFProcessor()  # Vai falhar se API key não configurada
+            
+            # Tentar importar PDFTableGenerator  
+            from src.modules.pdf_data_to_table import PDFTableGenerator
+            generator = PDFTableGenerator()
+            
+            logger.info("Dependências AI verificadas com sucesso")
+            return {
+                'success': True,
+                'processor': processor,
+                'generator': generator
+            }
+            
+        except ImportError as e:
+            error_msg = f"Módulos AI não disponíveis: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'error_type': 'import_error'
+            }
+        except Exception as e:
+            error_msg = f"Erro ao inicializar dependências AI: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg,
+                'error_type': 'initialization_error'
+            }
+
+    def process_pdfs_with_ai(self, scraping_result: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+        """Processar PDFs com AI após scraping bem-sucedido."""
+        logger.info("Iniciando processamento AI dos PDFs...")
+        
+        # Verificar se há PDFs para processar
+        downloaded_files = scraping_result.get('files_downloaded', [])
+        if not downloaded_files:
+            logger.warning("Nenhum PDF encontrado para processamento AI")
+            scraping_result['ai_processing'] = {
+                'attempted': False,
+                'reason': 'Nenhum PDF encontrado'
+            }
+            return scraping_result
+        
+        # Verificar dependências AI
+        ai_check = self.verify_ai_dependencies()
+        if not ai_check['success']:
+            logger.error(f"Dependências AI não disponíveis: {ai_check['error']}")
+            return self.handle_ai_processing_error(ai_check, scraping_result, config)
+        
+        try:
+            processor = ai_check['processor']
+            generator = ai_check['generator']
+            
+            # Determinar diretório de PDFs
+            pdf_directory = scraping_result.get('download_path', 'downloads/raw/portal_saude_mg')
+            logger.info(f"Processando PDFs do diretório: {pdf_directory}")
+            
+            # Atualizar tela de progresso
+            self.update_processing_screen("Processando PDFs com IA...")
+            
+            # Processar todos os PDFs
+            processing_results = processor.process_pdf_batch(pdf_directory)
+            
+            if not processing_results:
+                error_msg = "Nenhum resultado do processamento AI"
+                logger.error(error_msg)
+                return self.handle_ai_processing_error(
+                    {'success': False, 'error': error_msg},
+                    scraping_result, config
+                )
+            
+            # Atualizar tela de progresso
+            self.update_processing_screen("Gerando tabela Excel...")
+            
+            # Gerar tabela Excel
+            table_result = generator.process_extraction_results_to_table(
+                processing_results, pdf_directory
+            )
+            
+            if not table_result.get('success', False):
+                error_msg = f"Falha na geração da tabela: {table_result.get('error', 'Erro desconhecido')}"
+                logger.error(error_msg)
+                return self.handle_ai_processing_error(
+                    {'success': False, 'error': error_msg},
+                    scraping_result, config
+                )
+            
+            # Sucesso completo - adicionar informações AI ao resultado
+            logger.info("Processamento AI concluído com sucesso")
+            
+            # Calcular estatísticas
+            successful_extractions = sum(1 for r in processing_results if r.get('success', False))
+            failed_extractions = len(processing_results) - successful_extractions
+            total_tokens = sum(
+                r.get('extracted_data', {}).get('_ai_metadata', {}).get('tokens_used', 0)
+                for r in processing_results if r.get('success', False)
+            )
+            
+            # Combinar resultados
+            final_result = scraping_result.copy()
+            final_result['ai_processing'] = {
+                'success': True,
+                'pdfs_processed': len(processing_results),
+                'successful_extractions': successful_extractions,
+                'failed_extractions': failed_extractions,
+                'total_tokens_used': total_tokens,
+                'estimated_cost_usd': total_tokens * 0.000002,  # Rough estimate for GPT-4o-mini
+                'excel_file': table_result.get('output_file'),
+                'table_stats': {
+                    'total_rows': table_result.get('total_rows', 0),
+                    'extraction_issues': table_result.get('extraction_issues', [])
+                }
+            }
+            
+            return final_result
+            
+        except Exception as e:
+            error_msg = f"Erro durante processamento AI: {str(e)}"
+            logger.error(error_msg)
+            logger.exception("Stack trace do erro AI:")
+            return self.handle_ai_processing_error(
+                {'success': False, 'error': error_msg},
+                scraping_result, config
+            )
+
+    def handle_ai_processing_error(self, ai_error: Dict[str, Any], scraping_result: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+        """Lidar com erros de processamento AI sem falhar o programa."""
+        logger.warning("Processamento AI falhou, mas PDFs foram baixados com sucesso")
+        
+        # Adicionar informações de erro AI ao resultado
+        result_with_error = scraping_result.copy()
+        result_with_error['ai_processing'] = {
+            'success': False,
+            'attempted': True,
+            'error': ai_error.get('error', 'Erro desconhecido'),
+            'error_type': ai_error.get('error_type', 'unknown'),
+            'pdfs_available': len(scraping_result.get('files_downloaded', [])),
+            'recovery_options': [
+                'Configurar API key OpenAI',
+                'Instalar dependências AI',
+                'Tentar processamento novamente'
+            ]
+        }
+        
+        # Mostrar tela de erro específica para AI
+        self.show_ai_error_screen(result_with_error, config)
+        return result_with_error
+
+    def update_processing_screen(self, status_message: str):
+        """Atualizar tela de processamento com novo status."""
+        # Por enquanto só log, depois podemos implementar atualização visual
+        logger.info(f"Status: {status_message}")
 
     def show_processing_screen(self, config: Dict[str, Any]):
         """Show processing screen with progress indicators."""
@@ -463,7 +627,9 @@ class PortalSaudeUI:
             "Aplicando filtros", 
             "Coletando links de download",
             "Baixando arquivos",
-            "Processando dados",
+            "Verificando dependências AI",
+            "Processando PDFs com IA",
+            "Gerando tabela Excel",
             "Finalizando"
         ]
         
@@ -472,6 +638,8 @@ class PortalSaudeUI:
         
         print("")
         print("Aguarde... O processo pode levar alguns minutos.")
+        print("• Scraping: 1-3 minutos")
+        print("• Processamento AI: 2-5 minutos (depende do número de PDFs)")
         print("")
         print("Pressione Ctrl+C para cancelar")
 
@@ -513,22 +681,81 @@ class PortalSaudeUI:
         # Mostrar resumo adicional se disponível
         if result.get('summary'):
             print(f"- Resumo: {result.get('summary')}")
+        
         print("")
         print(f"Arquivos salvos em: {result.get('download_path', 'downloads/')}")
-        print("")
-        print("1. Abrir pasta de downloads")
-        print("2. Processar outro site")
-        print("3. Sair")
+        
+        # Mostrar informações específicas sobre processamento AI
+        ai_info = result.get('ai_processing', {})
+        if ai_info.get('success'):
+            print("")
+            print("=== PROCESSAMENTO AI ===")
+            print(f"✓ PDFs processados com IA: {ai_info.get('pdfs_processed', 0)}")
+            print(f"✓ Extrações bem-sucedidas: {ai_info.get('successful_extractions', 0)}")
+            if ai_info.get('failed_extractions', 0) > 0:
+                print(f"⚠ Extrações com erro: {ai_info.get('failed_extractions', 0)}")
+            print(f"✓ Tokens consumidos: {ai_info.get('total_tokens_used', 0):,}")
+            print(f"✓ Custo estimado: ${ai_info.get('estimated_cost_usd', 0):.4f}")
+            
+            excel_file = ai_info.get('excel_file')
+            if excel_file:
+                print(f"✓ Tabela Excel gerada: {excel_file}")
+                table_stats = ai_info.get('table_stats', {})
+                if table_stats.get('total_rows'):
+                    print(f"  - Linhas na tabela: {table_stats['total_rows']}")
+                    issues = table_stats.get('extraction_issues', [])
+                    if issues:
+                        print(f"  - Problemas encontrados: {len(issues)}")
+        elif ai_info.get('attempted'):
+            print("")
+            print("=== PROCESSAMENTO AI ===")
+            print("✗ Processamento AI falhou")
+            print(f"  - {ai_info.get('error', 'Erro desconhecido')}")
+            print(f"  - PDFs disponíveis: {ai_info.get('pdfs_available', 0)}")
+        else:
+            print("")
+            print("=== PROCESSAMENTO AI ===")
+            print("- Não foi tentado (nenhum PDF encontrado)")
+        
         print("")
         
-        choice = self.terminal.get_user_input("Digite sua opcao (1-3): ")
-        
-        if choice == "1":
-            self.open_downloads_folder(result.get('download_path'))
-        elif choice == "2":
-            return
-        elif choice == "3":
-            self.terminal.running = False
+        # Opções baseadas no sucesso do AI
+        if ai_info.get('success') and ai_info.get('excel_file'):
+            print("1. Abrir tabela Excel")
+            print("2. Abrir pasta de downloads (PDFs)")
+            print("3. Abrir pasta processed (Excel)")
+            print("4. Processar outro site")
+            print("5. Sair")
+            print("")
+            
+            choice = self.terminal.get_user_input("Digite sua opcao (1-5): ")
+            
+            if choice == "1":
+                self.open_excel_file(ai_info.get('excel_file'))
+            elif choice == "2":
+                self.open_downloads_folder(result.get('download_path'))
+            elif choice == "3":
+                import os
+                processed_path = os.path.dirname(ai_info.get('excel_file', 'downloads/processed'))
+                self.open_downloads_folder(processed_path)
+            elif choice == "4":
+                return
+            elif choice == "5":
+                self.terminal.running = False
+        else:
+            print("1. Abrir pasta de downloads")
+            print("2. Processar outro site")
+            print("3. Sair")
+            print("")
+            
+            choice = self.terminal.get_user_input("Digite sua opcao (1-3): ")
+            
+            if choice == "1":
+                self.open_downloads_folder(result.get('download_path'))
+            elif choice == "2":
+                return
+            elif choice == "3":
+                self.terminal.running = False
 
     def show_error_screen(self, result: Dict[str, Any]):
         """Show error screen."""
@@ -595,6 +822,137 @@ class PortalSaudeUI:
         print("")
         print("Para análise técnica, verifique os arquivos de log.")
         print("")
+        input("Pressione Enter para continuar...")
+
+    def open_excel_file(self, excel_path: str = None):
+        """Open Excel file in default application."""
+        try:
+            if excel_path is None or not os.path.exists(excel_path):
+                print(f"Arquivo Excel não encontrado: {excel_path}")
+                input("Pressione Enter para continuar...")
+                return
+            
+            if sys.platform == "win32":
+                os.startfile(excel_path)
+            elif sys.platform == "darwin":
+                os.system(f"open '{excel_path}'")
+            else:
+                os.system(f"xdg-open '{excel_path}'")
+                
+            print(f"Abrindo arquivo: {excel_path}")
+            
+        except Exception as e:
+            print(f"Erro ao abrir arquivo Excel: {e}")
+        
+        input("Pressione Enter para continuar...")
+
+    def show_ai_error_screen(self, result: Dict[str, Any], config: Dict[str, Any]):
+        """Show AI processing error screen with recovery options."""
+        self.terminal.clear_screen()
+        print("========================================")
+        print("        ERRO NO PROCESSAMENTO AI")
+        print("========================================")
+        print("")
+        print("Status: PDFs baixados com sucesso ✓")
+        print("        Processamento AI falhou ✗")
+        print("")
+        
+        ai_info = result.get('ai_processing', {})
+        error_msg = ai_info.get('error', 'Erro desconhecido')
+        error_type = ai_info.get('error_type', 'unknown')
+        
+        print("Erro encontrado:")
+        if error_type == 'import_error':
+            print("• Módulos AI não estão instalados")
+            print("• Execute: pip install -r requirements.txt")
+        elif error_type == 'initialization_error':
+            if 'API key' in error_msg or 'OpenAI' in error_msg:
+                print("• OpenAI API key não configurada")
+                print("• Verifique se OPENAI_API_KEY está definida no arquivo .env")
+            else:
+                print(f"• {error_msg}")
+        else:
+            print(f"• {error_msg}")
+        
+        print("")
+        print("Arquivos baixados salvos em:")
+        print(f"{result.get('download_path', 'downloads/raw/portal_saude_mg')}")
+        print(f"Total: {len(result.get('files_downloaded', []))} PDFs ({result.get('total_size_mb', 0):.1f} MB)")
+        print("")
+        
+        print("Opções de recuperação:")
+        print("1. Configurar API key e tentar processamento AI novamente")
+        print("2. Instalar dependências AI faltantes")
+        print("3. Continuar sem processamento AI (só PDFs baixados)")
+        print("4. Abrir pasta de downloads")
+        print("5. Voltar ao menu principal")
+        print("6. Sair")
+        print("")
+        
+        choice = self.terminal.get_user_input("Digite sua opção (1-6): ")
+        
+        if choice == "1":
+            # Tentar processamento AI novamente
+            try:
+                logger.info("Usuário escolheu tentar processamento AI novamente")
+                final_result = self.process_pdfs_with_ai(result, config)
+                self.show_success_screen(final_result)
+            except Exception as e:
+                logger.error(f"Erro ao tentar processamento AI novamente: {e}")
+                self.terminal.show_error("Falha ao tentar novamente. Verifique a configuração.")
+                self.show_ai_error_screen(result, config)
+                
+        elif choice == "2":
+            self.show_dependency_help_screen()
+            
+        elif choice == "3":
+            # Continuar sem AI - mostrar resultado do scraping apenas
+            self.show_success_screen(result)
+            
+        elif choice == "4":
+            self.open_downloads_folder(result.get('download_path'))
+            self.show_ai_error_screen(result, config)
+            
+        elif choice == "5":
+            return  # Volta ao menu principal
+            
+        elif choice == "6":
+            self.terminal.running = False
+            
+        else:
+            self.terminal.show_error("Opção inválida. Tente novamente.")
+            self.show_ai_error_screen(result, config)
+
+    def show_dependency_help_screen(self):
+        """Show help screen for installing AI dependencies."""
+        self.terminal.clear_screen()
+        print("========================================")
+        print("         AJUDA - DEPENDÊNCIAS AI")
+        print("========================================")
+        print("")
+        print("Para usar o processamento AI, você precisa:")
+        print("")
+        print("1. Instalar dependências Python:")
+        print("   pip install -r requirements.txt")
+        print("")
+        print("2. Configurar API key OpenAI:")
+        print("   - Crie/edite o arquivo .env na raiz do projeto")
+        print("   - Adicione: OPENAI_API_KEY=sua_chave_aqui")
+        print("   - Obtenha sua chave em: https://platform.openai.com/api-keys")
+        print("")
+        print("3. Verificar se o arquivo .env está no formato correto:")
+        print("   OPENAI_API_KEY=sk-proj-...")
+        print("   (sem espaços ao redor do =)")
+        print("")
+        print("4. Reiniciar o programa após configurar")
+        print("")
+        print("Dependências necessárias:")
+        print("• pymupdf4llm - Para extração de texto de PDFs")
+        print("• openai - Para processamento com IA")
+        print("• pandas - Para manipulação de dados")
+        print("• openpyxl - Para geração de Excel")
+        print("")
+        
         input("Pressione Enter para continuar...")
 
     def format_config_summary(self, config: Dict[str, Any]) -> str:

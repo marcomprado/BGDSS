@@ -1,0 +1,32 @@
+# Web Scraping and Browser Automation
+selenium>=4.27.1
+webdriver-manager>=4.0.2
+requests>=2.32.3
+urllib3>=2.2.3
+
+# PDF Processing and AI
+pymupdf4llm>=0.0.16
+openai>=1.58.1
+
+# Data Processing and Export
+pandas>=2.2.3
+openpyxl>=3.1.5
+xlsxwriter>=3.2.0
+
+# System and Utilities
+psutil>=6.1.0
+python-dotenv>=1.0.1
+pathlib2>=2.3.7
+
+# Logging and Error Handling
+colorlog>=6.8.2
+
+# Date and Time Processing
+python-dateutil>=2.9.0
+
+# Optional: Enhanced HTTP handling
+httpx>=0.28.1
+
+# Development and Testing (optional)
+pytest>=8.3.4
+pytest-cov>=6.0.0
