@@ -4,11 +4,11 @@ Implements singleton pattern with colored console output and file rotation.
 """
 
 import logging
-import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+import threading
 class ColoredFormatter(logging.Formatter):
     """Custom formatter with colored output for console."""
     
@@ -40,6 +40,11 @@ class ColoredFormatter(logging.Formatter):
         for attr in ['stack_info', 'sinfo']:
             if hasattr(record, attr):
                 setattr(record_copy, attr, getattr(record, attr))
+        
+        # Add context to message
+        context = get_context()
+        if context:
+            record_copy.msg = f"{context} {record_copy.msg}"
         
         # Apply colors to the copy
         levelname = record_copy.levelname
@@ -76,18 +81,19 @@ class Logger:
         if self._logger.handlers:
             return
         
-        logs_dir = Path(__file__).parent.parent.parent / 'logs'
-        logs_dir.mkdir(exist_ok=True)
+        self.logs_dir = Path(__file__).parent.parent.parent / 'logs'
+        self.logs_dir.mkdir(exist_ok=True)
         
+        # Console handler - only for critical info during scraping
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(logging.WARNING)  # Reduced verbosity for terminal
         console_formatter = ColoredFormatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            '%(levelname)s: %(message)s'  # Simplified format
         )
         console_handler.setFormatter(console_formatter)
         
-        log_filename = logs_dir / f'web_scraper_{datetime.now().strftime("%Y%m%d")}.log'
+        # Main log file - comprehensive logging
+        log_filename = self.logs_dir / f'web_scraper_{datetime.now().strftime("%Y%m%d")}.log'
         file_handler = RotatingFileHandler(
             log_filename,
             maxBytes=10 * 1024 * 1024,  
@@ -95,15 +101,15 @@ class Logger:
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)
-        # Use plain formatter for file handler (no colors)
         file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
+            '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(funcName)s() - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         file_handler.setFormatter(file_formatter)
         
         self._logger.addHandler(console_handler)
         self._logger.addHandler(file_handler)
+        self.session_id = None
     
     def set_level(self, level: str) -> None:
         """Set the logging level."""
@@ -144,6 +150,102 @@ class Logger:
     def exception(self, message: str, *args, **kwargs) -> None:
         """Log exception with traceback."""
         self._logger.exception(message, *args, **kwargs)
+    
+    def start_session(self, session_type: str = "scraping") -> str:
+        """Start a new logging session with dedicated files."""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_id = f"{session_type}_{timestamp}"
+        
+        # Create session-specific log file
+        session_filename = self.logs_dir / f'{self.session_id}.log'
+        session_handler = RotatingFileHandler(
+            session_filename,
+            maxBytes=50 * 1024 * 1024,  # 50MB per session
+            backupCount=3,
+            encoding='utf-8'
+        )
+        session_handler.setLevel(logging.DEBUG)
+        session_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        session_handler.setFormatter(session_formatter)
+        
+        # Add session handler
+        self._logger.addHandler(session_handler)
+        
+        # Create error-only file for this session
+        error_filename = self.logs_dir / f'{self.session_id}_errors.log'
+        error_handler = RotatingFileHandler(
+            error_filename,
+            maxBytes=10 * 1024 * 1024,
+            backupCount=2,
+            encoding='utf-8'
+        )
+        error_handler.setLevel(logging.ERROR)
+        error_handler.setFormatter(session_formatter)
+        self._logger.addHandler(error_handler)
+        
+        self.info(f"=== SESSÃO INICIADA: {self.session_id} ===")
+        return self.session_id
+    
+    def end_session(self) -> None:
+        """End current logging session and remove session handlers."""
+        if self.session_id:
+            self.info(f"=== SESSÃO FINALIZADA: {self.session_id} ===")
+            
+            # Remove session-specific handlers
+            handlers_to_remove = []
+            for handler in self._logger.handlers:
+                if isinstance(handler, RotatingFileHandler):
+                    if self.session_id in str(handler.baseFilename):
+                        handlers_to_remove.append(handler)
+            
+            for handler in handlers_to_remove:
+                handler.close()
+                self._logger.removeHandler(handler)
+            
+            self.session_id = None
+    
+    def progress_info(self, message: str, *args, **kwargs) -> None:
+        """Log progress information - only to file, not console."""
+        # Create a temporary handler that only writes to file
+        for handler in self._logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
+                handler.setLevel(logging.CRITICAL)  # Temporarily disable console
+        
+        self._logger.info(message, *args, **kwargs)
+        
+        # Restore console handler level
+        for handler in self._logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
+                handler.setLevel(logging.WARNING)
+    
+    def download_progress(self, filename: str, current: int, total: int, speed: str = "") -> None:
+        """Log download progress details."""
+        percentage = (current / total * 100) if total > 0 else 0
+        self.progress_info(f"Download: {filename} - {current}/{total} ({percentage:.1f}%) {speed}")
 
 
+# Global logger instance
 logger = Logger()
+
+# Thread-local storage for context
+_local = threading.local()
+
+def set_context(site: str = None, year: str = None, month: str = None):
+    """Set logging context for current thread."""
+    _local.site = site
+    _local.year = year  
+    _local.month = month
+
+def get_context() -> str:
+    """Get current logging context."""
+    parts = []
+    if hasattr(_local, 'site') and _local.site:
+        parts.append(f"Site:{_local.site}")
+    if hasattr(_local, 'year') and _local.year:
+        parts.append(f"Ano:{_local.year}")
+    if hasattr(_local, 'month') and _local.month:
+        parts.append(f"Mes:{_local.month}")
+    return f"[{' '.join(parts)}]" if parts else ""
