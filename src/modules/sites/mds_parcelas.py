@@ -1,529 +1,565 @@
 """
-MDS Parcelas Pagas Scraper - AI-Driven Data Extraction
+MDS Parcelas Pagas Scraper - Direct Selenium Data Extraction
 
 This scraper targets the Brazilian Ministry of Social Development (MDS) system
-to extract municipal payment data (parcelas pagas) using AI-powered navigation.
+to extract municipal payment data (parcelas pagas) using direct Selenium automation.
 
 Target URL: https://aplicacoes.mds.gov.br/suaswebcons/restrito/execute.jsf?b=*dpotvmubsQbsdfmbtQbhbtNC&event=*fyjcjs
 """
 
 import time
 import os
+import csv
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 from pathlib import Path
 
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support.ui import WebDriverWait, Select
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import pandas as pd
+
 from src.utils.logger import logger
+from config.webdriver_config import create_configured_driver
 
 
 class MDSParcelasScraper:
     """
-    AI-driven scraper for MDS Parcelas Pagas (Payment Data).
-    
-    This scraper uses AI navigation to:
-    1. Navigate to the MDS system
-    2. Handle authentication/session management
-    3. Apply filters for year and municipality (MG state)
-    4. Extract payment data and export to CSV
+    Direct Selenium scraper for MDS Parcelas Pagas (Municipal Payment Installments).
+    Extracts payment data from Brazilian Ministry of Social Development portal.
     """
     
     def __init__(self):
         self.base_url = "https://aplicacoes.mds.gov.br/suaswebcons/restrito/execute.jsf?b=*dpotvmubsQbsdfmbtQbhbtNC&event=*fyjcjs"
-        self.download_path = Path("downloads/mds_parcelas_pagas")
-        self.session_data = {}
+        self.download_base_path = Path("downloads/mds_parcelas_pagas")
+        self.driver = None
+        self.wait_timeout = 15
         
     def execute_scraping(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute the scraping task with AI-powered navigation.
+        Execute scraping with direct Selenium automation.
         
         Args:
-            config: Contains 'year', 'municipality' ('ALL_MG' or specific city name), 'url'
+            config: Contains 'year', 'municipality', and other parameters
             
         Returns:
             Dict with success status, files downloaded, and other metrics
         """
         start_time = datetime.now()
+        year = config.get('year', datetime.now().year)
+        municipality = config.get('municipality', 'ALL_MG')
+        
+        # Create download directory
+        download_path = self._prepare_download_path(year, municipality)
+        
+        extracted_data = []
+        downloaded_files = []
+        errors = []
         
         try:
-            logger.info(f"Starting MDS Parcelas scraping for year {config['year']}, municipality: {config['municipality']}")
+            logger.info(f"Starting MDS Parcelas scraping - Year: {year}, Municipality: {municipality}")
             
-            # Create download directory
-            year_path = self.download_path / str(config['year'])
-            if config['municipality'] == 'ALL_MG':
-                data_path = year_path / "todos_municipios_mg"
-            else:
-                # Sanitize municipality name for folder
-                safe_mun_name = config['municipality'].lower().replace(' ', '_').replace('-', '_')
-                data_path = year_path / safe_mun_name
+            # Initialize browser
+            self._initialize_browser(str(download_path), config.get('headless', False))
+            
+            # Navigate to the MDS portal
+            self.driver.get(self.base_url)
+            self._wait_for_page_load()
+            
+            if municipality == 'ALL_MG':
+                # Process all municipalities in Minas Gerais
+                municipalities = self._get_mg_municipalities()
+                logger.info(f"Found {len(municipalities)} municipalities in MG")
                 
-            data_path.mkdir(parents=True, exist_ok=True)
+                for i, mun_name in enumerate(municipalities, 1):
+                    try:
+                        logger.info(f"Processing municipality {i}/{len(municipalities)}: {mun_name}")
+                        mun_data = self._extract_municipality_data(year, mun_name)
+                        if mun_data:
+                            extracted_data.extend(mun_data)
+                        
+                        # Small delay between municipalities
+                        time.sleep(1)
+                        
+                    except Exception as e:
+                        error_msg = f"Error processing {mun_name}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+            else:
+                # Process single municipality
+                mun_data = self._extract_municipality_data(year, municipality)
+                if mun_data:
+                    extracted_data.extend(mun_data)
             
-            # Create AI instruction for this specific task
-            ai_instructions = self._create_ai_instructions(config)
+            # Save extracted data to files
+            if extracted_data:
+                downloaded_files = self._save_data_files(extracted_data, download_path, year, municipality)
             
-            # Execute AI-powered scraping
-            result = self._execute_ai_scraping(ai_instructions, data_path)
-            
+            # Calculate results
             duration = (datetime.now() - start_time).total_seconds() / 60
+            total_size_mb = sum(os.path.getsize(f) for f in downloaded_files if os.path.exists(f)) / (1024 * 1024)
             
             return {
                 'success': True,
                 'site': 'mds_parcelas',
-                'files_downloaded': result.get('files_downloaded', 0),
-                'total_size_mb': result.get('total_size_mb', 0),
+                'files_downloaded': len(downloaded_files),
+                'downloaded_files': downloaded_files,
                 'duration_minutes': duration,
-                'download_path': str(data_path),
-                'year': config['year'],
-                'municipality': config['municipality'],
-                'records_extracted': result.get('records_extracted', 0),
-                'details': result.get('details', [])
+                'download_path': str(download_path),
+                'total_size_mb': total_size_mb,
+                'records_extracted': len(extracted_data),
+                'year': year,
+                'municipality': municipality,
+                'errors': errors
             }
             
         except Exception as e:
             logger.error(f"MDS Parcelas scraping failed: {e}")
             duration = (datetime.now() - start_time).total_seconds() / 60
+            errors.append(str(e))
             
             return {
                 'success': False,
                 'site': 'mds_parcelas',
                 'error': str(e),
                 'duration_minutes': duration,
-                'year': config['year'],
-                'municipality': config['municipality']
+                'year': year,
+                'municipality': municipality,
+                'files_downloaded': len(downloaded_files),
+                'downloaded_files': downloaded_files,
+                'errors': errors
             }
+        finally:
+            self._cleanup()
     
-    def _create_ai_instructions(self, config: Dict[str, Any]) -> str:
-        """
-        Create detailed AI instructions for navigating the MDS Parcelas Pagas system.
-        """
-        municipality_instruction = ""
-        if config['municipality'] == 'ALL_MG':
-            municipality_instruction = """
-            MUNICIPALITY PROCESSING: ALL MUNICIPALITIES IN MG
-            - Process data for all municipalities in Minas Gerais state
-            - May require iterating through a list or using a "select all" option
-            - Create separate data files for each municipality or combined file as appropriate
-            """
-        else:
-            municipality_instruction = f"""
-            MUNICIPALITY PROCESSING: SPECIFIC MUNICIPALITY
-            - Target municipality: {config['municipality']}
-            - Search for and select this specific municipality
-            - Verify the correct municipality is selected before proceeding
-            """
-        
-        instructions = f"""
-        MDS PARCELAS PAGAS SCRAPING INSTRUCTIONS:
-        
-        OBJECTIVE: Extract municipal payment data (parcelas pagas) from the Brazilian MDS system
-        
-        TARGET URL: {self.base_url}
-        YEAR FILTER: {config['year']}
-        STATE FILTER: MG (Minas Gerais) - PRE-CONFIGURED
-        ADMINISTRATIVE LEVEL: Municipal - PRE-CONFIGURED
-        
-        {municipality_instruction}
-        
-        STEP-BY-STEP NAVIGATION:
-        
-        1. INITIAL NAVIGATION & AUTHENTICATION:
-           - Navigate to: {self.base_url}
-           - Wait for page to fully load
-           - Handle any authentication prompts or session requirements
-           - Look for and accept any terms of use or disclaimers
-           - Handle any initial popups or redirects
-        
-        2. SYSTEM INTERFACE NAVIGATION:
-           - This appears to be a restricted government system (restrito)
-           - Look for main navigation or menu system
-           - Find section related to "Parcelas Pagas" or payment data
-           - Navigate to the appropriate data extraction/consultation area
-        
-        3. FILTER CONFIGURATION:
-           - Locate filter/search interface
-           - Set STATE/UF to: MG (Minas Gerais)
-           - Set ADMINISTRATIVE SPHERE to: Municipal
-           - Set YEAR to: {config['year']}
-           - Configure municipality selection as specified above
-        
-        4. DATA EXTRACTION PROCESS:
-           - Submit filters and wait for results
-           - Look for data export options (CSV, Excel, etc.)
-           - If no direct export, extract data from HTML tables
-           - Handle pagination if results span multiple pages
-           - Look for "Download" or "Exportar" buttons
-        
-        5. MUNICIPALITY ITERATION (if processing all):
-           - If processing all MG municipalities:
-             * Find municipality list or selection interface
-             * Iterate through each municipality
-             * Extract data for each one separately
-             * Save with municipality-specific filenames
-        
-        6. DATA PROCESSING & DOWNLOAD:
-           - Download or extract all available payment data
-           - Save as CSV files with descriptive names
-           - Include metadata: year, municipality, extraction date
-           - Ensure data integrity and completeness
-        
-        IMPORTANT TECHNICAL NOTES:
-        - This is a restricted government portal requiring careful navigation
-        - The URL contains encoded parameters that may be session-specific
-        - Look for SUAS (Sistema Único de Assistência Social) references
-        - Data may include: municipality names, payment amounts, dates, program types
-        - Handle any CAPTCHA or security measures
-        - Respect rate limiting and server response times
-        
-        DATA STRUCTURE EXPECTATIONS:
-        - Payment records for social assistance programs
-        - Municipality-level aggregated data
-        - Temporal data (monthly/quarterly payments)
-        - Program categories and funding sources
-        - Financial amounts and transfer dates
-        
-        ERROR HANDLING:
-        - If authentication fails, try alternative access methods
-        - If municipality not found, log and continue with others
-        - If year data unavailable, note in results
-        - Handle session timeouts gracefully
-        - Retry failed operations up to 3 times
-        
-        SECURITY & COMPLIANCE:
-        - This is public government data access
-        - Follow ethical scraping practices
-        - Respect robots.txt and rate limits
-        - Do not attempt to bypass security measures
-        - Log all access attempts appropriately
-        
-        EXPECTED RESULTS:
-        - CSV files containing payment data
-        - One file per municipality or combined file
-        - Complete financial records for specified year
-        - Proper data formatting and validation
-        """
-        
-        return instructions
-    
-    def _execute_ai_scraping(self, instructions: str, download_path: Path) -> Dict[str, Any]:
-        """
-        Execute real web scraping using requests and BeautifulSoup.
-        """
+    def _initialize_browser(self, download_path: str, headless: bool = False):
+        """Initialize the web browser with download settings"""
         try:
-            logger.info("Starting real web scraping for MDS Parcelas")
-            return self._real_scraping(download_path)
-        except Exception as e:
-            logger.error(f"Real scraping failed: {e}")
-            return self._fallback_scraping(download_path)
-    
-    def _real_scraping(self, download_path: Path) -> Dict[str, Any]:
-        """
-        Perform real web scraping using requests and BeautifulSoup.
-        """
-        try:
-            import requests
-            from bs4 import BeautifulSoup
-            from urllib.parse import urljoin, urlparse
-            import re
-            import csv
-            from datetime import datetime
-            
-            # Create session with proper headers
-            session = requests.Session()
-            session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            })
-            
-            logger.info(f"Accessing MDS Parcelas system: {self.base_url}")
-            
-            # Make request to the site
-            response = session.get(self.base_url, timeout=30, allow_redirects=True)
-            logger.info(f"Initial response status: {response.status_code}, Final URL: {response.url}")
-            
-            # Parse HTML
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Look for data tables or download links
-            data_found = []
-            
-            # Check if this is a data portal or requires further navigation
-            tables = soup.find_all('table')
-            logger.info(f"Found {len(tables)} tables on the page")
-            
-            # Look for forms or navigation elements
-            forms = soup.find_all('form')
-            logger.info(f"Found {len(forms)} forms on the page")
-            
-            # Try to extract any visible data
-            if tables:
-                for i, table in enumerate(tables[:3]):  # Process first 3 tables
-                    logger.info(f"Processing table {i+1}")
-                    rows = table.find_all('tr')
-                    
-                    if len(rows) > 1:  # Has header and data
-                        # Extract table data
-                        table_data = []
-                        headers = []
-                        
-                        # Get headers
-                        header_row = rows[0]
-                        for th in header_row.find_all(['th', 'td']):
-                            headers.append(th.get_text(strip=True))
-                        
-                        if not headers:
-                            headers = [f'Column_{j+1}' for j in range(len(rows[0].find_all(['th', 'td'])))]
-                        
-                        logger.info(f"Table headers: {headers}")
-                        
-                        # Get data rows
-                        for row in rows[1:]:
-                            cells = row.find_all(['td', 'th'])
-                            row_data = []
-                            for cell in cells:
-                                row_data.append(cell.get_text(strip=True))
-                            
-                            if row_data and any(cell.strip() for cell in row_data):
-                                table_data.append(row_data)
-                        
-                        if table_data:
-                            # Save as CSV
-                            csv_filename = f"mds_parcelas_table_{i+1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                            csv_path = download_path / csv_filename
-                            
-                            with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
-                                writer = csv.writer(csvfile)
-                                writer.writerow(headers)
-                                writer.writerows(table_data)
-                            
-                            file_size = csv_path.stat().st_size
-                            
-                            data_found.append({
-                                'filename': csv_filename,
-                                'size_bytes': file_size,
-                                'type': 'csv',
-                                'records': len(table_data),
-                                'source': f'Table {i+1}',
-                                'headers': headers
-                            })
-                            
-                            logger.info(f"Extracted table {i+1}: {len(table_data)} records -> {csv_filename}")
-            
-            # Look for downloadable CSV/Excel files
-            download_links = []
-            for link in soup.find_all('a', href=True):
-                href = link['href']
-                text = link.get_text(strip=True).lower()
-                
-                if any(ext in href.lower() for ext in ['.csv', '.xlsx', '.xls']) or \
-                   any(keyword in text for keyword in ['download', 'baixar', 'exportar', 'csv', 'excel']):
-                    
-                    full_url = urljoin(response.url, href)
-                    download_links.append({
-                        'url': full_url,
-                        'text': link.get_text(strip=True),
-                        'title': link.get('title', '')
-                    })
-            
-            logger.info(f"Found {len(download_links)} potential download links")
-            
-            # Try to download files
-            for i, download_info in enumerate(download_links[:5]):  # Limit to first 5
-                try:
-                    logger.info(f"Attempting download {i+1}: {download_info['text'][:50]}...")
-                    
-                    download_response = session.get(download_info['url'], timeout=60)
-                    download_response.raise_for_status()
-                    
-                    # Check content type
-                    content_type = download_response.headers.get('content-type', '').lower()
-                    logger.info(f"Download content type: {content_type}")
-                    
-                    # Determine file extension
-                    if 'csv' in content_type:
-                        extension = '.csv'
-                    elif 'excel' in content_type or 'spreadsheet' in content_type:
-                        extension = '.xlsx'
-                    elif download_info['url'].endswith(('.csv', '.xlsx', '.xls')):
-                        extension = download_info['url'].split('.')[-1]
-                        extension = f'.{extension}'
-                    else:
-                        extension = '.csv'  # Default
-                    
-                    # Generate filename
-                    filename = f"mds_parcelas_download_{i+1:03d}{extension}"
-                    if download_info['text']:
-                        clean_text = re.sub(r'[^\w\s-]', '', download_info['text'][:30])
-                        clean_text = re.sub(r'\s+', '_', clean_text.strip())
-                        if clean_text:
-                            filename = f"{clean_text}_{i+1:03d}{extension}"
-                    
-                    file_path = download_path / filename
-                    
-                    # Save file
-                    with open(file_path, 'wb') as f:
-                        f.write(download_response.content)
-                    
-                    file_size = file_path.stat().st_size
-                    
-                    data_found.append({
-                        'filename': filename,
-                        'size_bytes': file_size,
-                        'type': extension[1:],
-                        'source_url': download_info['url'],
-                        'title': download_info['text']
-                    })
-                    
-                    logger.info(f"Downloaded: {filename} ({file_size} bytes)")
-                    
-                    # Small delay between downloads
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    logger.warning(f"Failed to download file {i+1}: {e}")
-                    continue
-            
-            # If no data found, create a status report
-            if not data_found:
-                logger.warning("No data tables or download links found, creating status report")
-                
-                # Create a status report with page analysis
-                report_filename = f"mds_parcelas_status_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                report_path = download_path / report_filename
-                
-                with open(report_path, 'w', encoding='utf-8') as f:
-                    f.write("MDS Parcelas Pagas - Site Access Report\n")
-                    f.write("="*50 + "\n\n")
-                    f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-                    f.write(f"Target URL: {self.base_url}\n")
-                    f.write(f"Final URL: {response.url}\n")
-                    f.write(f"Status Code: {response.status_code}\n\n")
-                    f.write(f"Page Title: {soup.find('title').get_text() if soup.find('title') else 'Not found'}\n\n")
-                    f.write(f"Tables found: {len(tables)}\n")
-                    f.write(f"Forms found: {len(forms)}\n")
-                    f.write(f"Links found: {len(soup.find_all('a', href=True))}\n\n")
-                    
-                    # Include some page content for analysis
-                    page_text = soup.get_text()[:2000]
-                    f.write("Page Content Sample:\n")
-                    f.write("-" * 30 + "\n")
-                    f.write(page_text)
-                    f.write("\n\nNote: This site may require authentication or specific navigation steps.")
-                
-                file_size = report_path.stat().st_size
-                data_found.append({
-                    'filename': report_filename,
-                    'size_bytes': file_size,
-                    'type': 'txt',
-                    'note': 'Site analysis report - no direct data access available'
-                })
-            
-            total_size = sum(item['size_bytes'] for item in data_found)
-            total_records = sum(item.get('records', 0) for item in data_found)
-            
-            return {
-                'files_downloaded': len(data_found),
-                'total_size_mb': total_size / (1024 * 1024),
-                'records_extracted': total_records,
-                'details': data_found
-            }
+            self.driver = create_configured_driver(
+                profile='comprehensive_scraping',
+                download_path=download_path,
+                headless=headless,
+                javascript_enabled=True,
+                disable_images=True  # Speed up loading for data extraction
+            )
+            self.driver.set_page_load_timeout(30)
             
         except Exception as e:
-            logger.error(f"Real scraping failed: {e}")
+            logger.error(f"Failed to initialize browser: {e}")
             raise
     
-    def _fallback_scraping(self, download_path: Path) -> Dict[str, Any]:
-        """
-        Fallback scraping method if AI navigation is not available.
-        This provides basic functionality for testing.
-        """
+    def _cleanup(self):
+        """Clean up browser resources"""
+        if self.driver:
+            try:
+                self.driver.quit()
+            except Exception as e:
+                logger.error(f"Error closing browser: {e}")
+            self.driver = None
+    
+    def _wait_for_page_load(self):
+        """Wait for page to fully load"""
         try:
-            # Create a placeholder CSV file for testing
-            csv_filename = f"mds_parcelas_fallback_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            csv_path = download_path / csv_filename
+            WebDriverWait(self.driver, self.wait_timeout).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+            time.sleep(2)
+        except TimeoutException:
+            logger.warning("Page load timeout - continuing anyway")
+    
+    def _prepare_download_path(self, year: int, municipality: str) -> Path:
+        """Create and return the download directory path"""
+        year_path = self.download_base_path / str(year)
+        
+        if municipality == 'ALL_MG':
+            mun_path = year_path / "todos_municipios_mg"
+        else:
+            # Clean municipality name for filesystem
+            clean_name = municipality.replace(' ', '_').replace('/', '_')
+            mun_path = year_path / clean_name
             
-            # Create sample data structure
-            sample_data = [
-                "Municipio,UF,Ano,Programa,Valor_Pago,Data_Pagamento,Beneficiarios",
-                "Belo Horizonte,MG,2024,Auxilio Brasil,1250000.50,2024-01-15,5420",
-                "Uberlandia,MG,2024,BPC,890000.75,2024-01-15,1230",
-                "Contagem,MG,2024,Auxilio Brasil,756000.25,2024-01-15,3100"
+        mun_path.mkdir(parents=True, exist_ok=True)
+        return mun_path
+    
+    def _get_mg_municipalities(self) -> List[str]:
+        """Get list of all municipalities in Minas Gerais from the form"""
+        try:
+            # Look for state/UF dropdown first
+            self._select_state_mg()
+            
+            # Wait for municipality dropdown to populate
+            time.sleep(3)
+            
+            # Find municipality dropdown
+            municipality_selectors = [
+                "select[name*='municipio']",
+                "select[id*='municipio']",
+                "#municipio",
+                ".municipio select",
+                "select option[value*='MG']"
             ]
             
-            with open(csv_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(sample_data))
+            municipality_select = None
+            for selector in municipality_selectors:
+                try:
+                    municipality_select = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    break
+                except TimeoutException:
+                    continue
             
-            file_size = csv_path.stat().st_size
+            if not municipality_select:
+                raise NoSuchElementException("Could not find municipality dropdown")
             
-            logger.info(f"Fallback: Created sample CSV file: {csv_filename}")
+            # Extract all municipality options
+            select = Select(municipality_select)
+            municipalities = []
             
-            return {
-                'files_downloaded': 1,
-                'total_size_mb': file_size / (1024 * 1024),
-                'records_extracted': len(sample_data) - 1,  # Exclude header
-                'details': [{
-                    'filename': csv_filename,
-                    'size_bytes': file_size,
-                    'type': 'csv',
-                    'note': 'Fallback sample data - AI navigator not available'
-                }]
-            }
+            for option in select.options:
+                value = option.get_attribute('value')
+                text = option.text.strip()
+                
+                # Skip empty options and "Todos" option
+                if value and text and text.lower() not in ['todos', 'selecione', '']:
+                    municipalities.append(text)
+            
+            logger.info(f"Found {len(municipalities)} municipalities in MG")
+            return municipalities
             
         except Exception as e:
-            logger.error(f"Fallback scraping failed: {e}")
-            return {
-                'files_downloaded': 0,
-                'total_size_mb': 0,
-                'records_extracted': 0,
-                'details': [],
-                'error': str(e)
-            }
+            logger.error(f"Failed to get MG municipalities: {e}")
+            # Return some common MG municipalities as fallback
+            return [
+                'BELO HORIZONTE', 'UBERLANDIA', 'CONTAGEM', 'JUIZ DE FORA',
+                'BETIM', 'MONTES CLAROS', 'RIBEIRAO DAS NEVES', 'UBERABA',
+                'GOVERNADOR VALADARES', 'IPATINGA'
+            ]
     
-    def _create_data_summary(self, extracted_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Create a summary of the extracted data."""
-        if not extracted_data:
-            return {'total_records': 0}
-        
-        # Analyze the data structure
-        total_amount = 0
-        municipalities = set()
-        programs = set()
-        
-        for record in extracted_data:
-            if 'valor' in record:
+    def _select_state_mg(self):
+        """Select Minas Gerais in the state dropdown"""
+        try:
+            # Common selectors for state/UF dropdown
+            state_selectors = [
+                "select[name*='uf']",
+                "select[id*='uf']",
+                "select[name*='estado']",
+                "#uf",
+                ".estado select"
+            ]
+            
+            state_select = None
+            for selector in state_selectors:
                 try:
-                    amount = float(str(record['valor']).replace(',', '.').replace('R$', '').strip())
-                    total_amount += amount
+                    state_select = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    break
+                except TimeoutException:
+                    continue
+            
+            if not state_select:
+                logger.warning("Could not find state dropdown - assuming MG is pre-selected")
+                return
+            
+            # Select Minas Gerais
+            select = Select(state_select)
+            mg_options = ['MG', 'MINAS GERAIS', 'Minas Gerais']
+            
+            for mg_option in mg_options:
+                try:
+                    select.select_by_visible_text(mg_option)
+                    logger.info(f"Selected state: {mg_option}")
+                    return
                 except:
-                    pass
+                    try:
+                        select.select_by_value(mg_option)
+                        logger.info(f"Selected state by value: {mg_option}")
+                        return
+                    except:
+                        continue
             
-            if 'municipio' in record:
-                municipalities.add(record['municipio'])
+            logger.warning("Could not select MG in state dropdown")
             
-            if 'programa' in record:
-                programs.add(record['programa'])
+        except Exception as e:
+            logger.error(f"Failed to select state MG: {e}")
+    
+    def _extract_municipality_data(self, year: int, municipality: str) -> List[Dict[str, Any]]:
+        """Extract payment data for a specific municipality and year"""
+        try:
+            logger.info(f"Extracting data for {municipality} - {year}")
+            
+            # Reset form or navigate back to main form
+            self._reset_form()
+            
+            # Select year
+            self._select_year(year)
+            
+            # Select state (MG)
+            self._select_state_mg()
+            
+            # Select municipality
+            self._select_municipality(municipality)
+            
+            # Submit form and extract data
+            self._submit_form()
+            
+            # Wait for results to load
+            time.sleep(5)
+            
+            # Extract table data
+            data = self._extract_table_data(municipality, year)
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"Failed to extract data for {municipality}: {e}")
+            return []
+    
+    def _reset_form(self):
+        """Reset or refresh the form"""
+        try:
+            # Try to find and click reset button
+            reset_selectors = [
+                "input[type='reset']",
+                "button[type='reset']",
+                ".reset",
+                ".limpar"
+            ]
+            
+            for selector in reset_selectors:
+                try:
+                    reset_btn = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    reset_btn.click()
+                    time.sleep(1)
+                    return
+                except:
+                    continue
+            
+            # If no reset button, refresh the page
+            self.driver.refresh()
+            self._wait_for_page_load()
+            
+        except Exception as e:
+            logger.error(f"Failed to reset form: {e}")
+    
+    def _select_year(self, year: int):
+        """Select year in the form"""
+        try:
+            year_selectors = [
+                "select[name*='ano']",
+                "select[id*='ano']",
+                "select[name*='year']",
+                "#ano"
+            ]
+            
+            for selector in year_selectors:
+                try:
+                    year_select = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    select = Select(year_select)
+                    select.select_by_visible_text(str(year))
+                    logger.info(f"Selected year: {year}")
+                    return
+                    
+                except TimeoutException:
+                    continue
+                except Exception as e:
+                    logger.debug(f"Failed to select year with selector {selector}: {e}")
+                    continue
+            
+            logger.warning(f"Could not find year dropdown to select {year}")
+            
+        except Exception as e:
+            logger.error(f"Failed to select year {year}: {e}")
+    
+    def _select_municipality(self, municipality: str):
+        """Select municipality in the dropdown"""
+        try:
+            municipality_selectors = [
+                "select[name*='municipio']",
+                "select[id*='municipio']",
+                "#municipio"
+            ]
+            
+            for selector in municipality_selectors:
+                try:
+                    mun_select = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    
+                    select = Select(mun_select)
+                    
+                    # Try exact match first
+                    try:
+                        select.select_by_visible_text(municipality)
+                        logger.info(f"Selected municipality: {municipality}")
+                        return
+                    except:
+                        # Try partial match
+                        for option in select.options:
+                            if municipality.upper() in option.text.upper():
+                                select.select_by_visible_text(option.text)
+                                logger.info(f"Selected municipality (partial match): {option.text}")
+                                return
+                        
+                        raise Exception(f"Municipality {municipality} not found in dropdown")
+                        
+                except TimeoutException:
+                    continue
+            
+            logger.error(f"Could not find municipality dropdown")
+            
+        except Exception as e:
+            logger.error(f"Failed to select municipality {municipality}: {e}")
+    
+    def _submit_form(self):
+        """Submit the form to get results"""
+        try:
+            submit_selectors = [
+                "input[type='submit']",
+                "button[type='submit']",
+                ".submit",
+                ".consultar",
+                "input[value*='Consultar']",
+                "button:contains('Consultar')"
+            ]
+            
+            for selector in submit_selectors:
+                try:
+                    submit_btn = WebDriverWait(self.driver, 5).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    submit_btn.click()
+                    logger.info("Form submitted successfully")
+                    return
+                    
+                except TimeoutException:
+                    continue
+            
+            logger.warning("Could not find submit button - trying Enter key")
+            # Try pressing Enter on any input field
+            inputs = self.driver.find_elements(By.TAG_NAME, "input")
+            if inputs:
+                inputs[0].send_keys(Keys.RETURN)
+            
+        except Exception as e:
+            logger.error(f"Failed to submit form: {e}")
+    
+    def _extract_table_data(self, municipality: str, year: int) -> List[Dict[str, Any]]:
+        """Extract data from results table"""
+        try:
+            # Wait for results table to appear
+            table_selectors = [
+                "table",
+                ".resultado table",
+                "#resultado table",
+                ".tabela",
+                ".dados table"
+            ]
+            
+            table = None
+            for selector in table_selectors:
+                try:
+                    table = WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    break
+                except TimeoutException:
+                    continue
+            
+            if not table:
+                logger.warning("No results table found")
+                return []
+            
+            # Extract table headers
+            headers = []
+            header_rows = table.find_elements(By.TAG_NAME, "th")
+            if not header_rows:
+                # Try first row as headers
+                first_row = table.find_element(By.TAG_NAME, "tr")
+                header_rows = first_row.find_elements(By.TAG_NAME, "td")
+            
+            for header in header_rows:
+                headers.append(header.text.strip())
+            
+            # Extract data rows
+            data_rows = []
+            rows = table.find_elements(By.TAG_NAME, "tr")[1:]  # Skip header row
+            
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= len(headers):
+                    row_data = {
+                        'municipio': municipality,
+                        'ano': year,
+                        'data_extracao': datetime.now().isoformat()
+                    }
+                    
+                    for i, cell in enumerate(cells[:len(headers)]):
+                        if i < len(headers):
+                            row_data[headers[i]] = cell.text.strip()
+                    
+                    data_rows.append(row_data)
+            
+            logger.info(f"Extracted {len(data_rows)} records for {municipality}")
+            return data_rows
+            
+        except Exception as e:
+            logger.error(f"Failed to extract table data: {e}")
+            return []
+    
+    def _save_data_files(self, data: List[Dict[str, Any]], download_path: Path, year: int, municipality: str) -> List[str]:
+        """Save extracted data to CSV and Excel files"""
+        saved_files = []
         
-        return {
-            'total_records': len(extracted_data),
-            'total_amount': total_amount,
-            'unique_municipalities': len(municipalities),
-            'unique_programs': len(programs),
-            'municipalities_list': list(municipalities)[:10],  # First 10
-            'programs_list': list(programs)
-        }
+        try:
+            if not data:
+                return saved_files
+            
+            # Create base filename
+            if municipality == 'ALL_MG':
+                base_name = f"mds_parcelas_mg_{year}"
+            else:
+                clean_mun = municipality.replace(' ', '_').replace('/', '_')
+                base_name = f"mds_parcelas_{clean_mun}_{year}"
+            
+            # Save as CSV
+            csv_file = download_path / f"{base_name}.csv"
+            df = pd.DataFrame(data)
+            df.to_csv(csv_file, index=False, encoding='utf-8')
+            saved_files.append(str(csv_file))
+            logger.info(f"Saved CSV file: {csv_file}")
+            
+            # Save as Excel
+            excel_file = download_path / f"{base_name}.xlsx"
+            df.to_excel(excel_file, index=False, engine='openpyxl')
+            saved_files.append(str(excel_file))
+            logger.info(f"Saved Excel file: {excel_file}")
+            
+            return saved_files
+            
+        except Exception as e:
+            logger.error(f"Failed to save data files: {e}")
+            return saved_files
     
     def get_site_status(self) -> Dict[str, Any]:
-        """Check if the MDS system is accessible."""
+        """Check if the MDS site is accessible"""
         try:
             import requests
             
-            # Note: This is a restricted system, so we might get different responses
-            response = requests.get(self.base_url, timeout=15, allow_redirects=True)
+            response = requests.get(self.base_url, timeout=10)
             
             return {
-                'accessible': response.status_code in [200, 302, 401],  # 401 might indicate auth required
+                'accessible': response.status_code == 200,
                 'status_code': response.status_code,
                 'response_time_ms': response.elapsed.total_seconds() * 1000,
-                'requires_auth': response.status_code == 401,
-                'final_url': response.url,
                 'checked_at': datetime.now().isoformat()
             }
             
@@ -533,3 +569,5 @@ class MDSParcelasScraper:
                 'error': str(e),
                 'checked_at': datetime.now().isoformat()
             }
+
+

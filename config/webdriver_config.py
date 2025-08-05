@@ -51,7 +51,6 @@ class WebDriverConfig:
         '--disable-extensions',
         '--disable-plugins',
         '--disable-images',
-        '--disable-javascript',
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-default-apps',
@@ -63,7 +62,16 @@ class WebDriverConfig:
         '--disable-client-side-phishing-detection',
         '--disable-sync',
         '--disable-features=TranslateUI',
-        '--disable-ipc-flooding-protection'
+        '--disable-ipc-flooding-protection',
+        # Memory management for stability
+        '--memory-pressure-off',
+        '--max_old_space_size=4096',
+        '--disable-gpu-sandbox',
+        '--no-zygote',
+        # Specific fixes for problematic sites
+        '--disable-features=VizDisplayCompositor',
+        '--disable-software-rasterizer',
+        '--disable-background-networking'
     ]
     
     DEFAULT_FIREFOX_OPTIONS = [
@@ -93,15 +101,144 @@ class WebDriverConfig:
         return getattr(settings, 'DOWNLOAD_DIR', default_dir)
     
     def _detect_driver_path(self, browser: str) -> Optional[str]:
-        """Detecta automaticamente o path do driver."""
+        """Detecta automaticamente o path do driver com suporte adequado para diferentes arquiteturas."""
         try:
             if browser == 'chrome':
-                return ChromeDriverManager().install()
+                # Clear cache and force fresh download
+                import os
+                import platform
+                import shutil
+                
+                # Detect system architecture
+                machine = platform.machine().lower()
+                system = platform.system().lower()
+                
+                print(f"Detected system: {system}, machine: {machine}")
+                
+                # Try system-installed driver first
+                system_driver = shutil.which('chromedriver')
+                if system_driver:
+                    print(f"Using system ChromeDriver: {system_driver}")
+                    return system_driver
+                
+                # Use ChromeDriverManager as fallback
+                manager = ChromeDriverManager()
+                
+                # Install and verify the driver
+                driver_path = manager.install()
+                
+                # Verify the driver is a valid executable binary
+                if self._is_valid_driver_binary(driver_path):
+                    import stat
+                    # Make sure it's executable
+                    os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                    print(f"ChromeDriver installed at: {driver_path}")
+                    return driver_path
+                else:
+                    print(f"Invalid ChromeDriver binary at: {driver_path}")
+                    # Try to find the actual binary in the directory
+                    actual_binary = self._find_chromedriver_binary(driver_path)
+                    if actual_binary:
+                        print(f"Found actual ChromeDriver binary at: {actual_binary}")
+                        return actual_binary
+                    return None
+                    
             elif browser == 'firefox':
-                return GeckoDriverManager().install()
+                manager = GeckoDriverManager(
+                    cache_valid_range=1
+                )
+                driver_path = manager.install()
+                
+                if os.path.exists(driver_path):
+                    import stat
+                    os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                    print(f"GeckoDriver installed at: {driver_path}")
+                    return driver_path
+                else:
+                    return None
+                    
         except Exception as e:
             print(f"Erro ao detectar driver path: {e}")
+            # Try to find system-installed drivers as fallback
+            import shutil
+            
+            if browser == 'chrome':
+                system_driver = shutil.which('chromedriver')
+                if system_driver:
+                    print(f"Using system ChromeDriver: {system_driver}")
+                    return system_driver
+            elif browser == 'firefox':
+                system_driver = shutil.which('geckodriver')
+                if system_driver:
+                    print(f"Using system GeckoDriver: {system_driver}")
+                    return system_driver
+            
             return None
+    
+    def _is_valid_driver_binary(self, driver_path: str) -> bool:
+        """Check if the given path points to a valid executable binary."""
+        if not os.path.exists(driver_path):
+            return False
+        
+        # Check if it's a file (not directory)
+        if not os.path.isfile(driver_path):
+            return False
+        
+        # Check if it's executable
+        if not os.access(driver_path, os.X_OK):
+            return False
+        
+        # Check if it's not a text file (avoid THIRD_PARTY_NOTICES, etc.)
+        try:
+            with open(driver_path, 'rb') as f:
+                # Read first few bytes to check if it's binary
+                header = f.read(4)
+                # On macOS, Mach-O binaries start with specific magic numbers
+                # On Linux, ELF binaries start with \x7fELF
+                if header.startswith(b'\x7fELF') or header.startswith(b'\xcf\xfa\xed\xfe') or header.startswith(b'\xce\xfa\xed\xfe'):
+                    return True
+                # Windows PE executables
+                elif header.startswith(b'MZ'):
+                    return True
+                return False
+        except (IOError, OSError):
+            return False
+    
+    def _find_chromedriver_binary(self, base_path: str) -> Optional[str]:
+        """Find the actual ChromeDriver binary in a directory structure."""
+        import glob
+        
+        # If base_path is a file, check its parent directory
+        if os.path.isfile(base_path):
+            search_dir = os.path.dirname(base_path)
+        else:
+            search_dir = base_path
+        
+        # Common ChromeDriver binary names
+        binary_names = ['chromedriver', 'chromedriver.exe']
+        
+        # Search in the directory and subdirectories
+        for binary_name in binary_names:
+            # Direct path
+            direct_path = os.path.join(search_dir, binary_name)
+            if self._is_valid_driver_binary(direct_path):
+                return direct_path
+            
+            # Search in subdirectories (recursive up to 2 levels)
+            pattern = os.path.join(search_dir, '*', binary_name)
+            matches = glob.glob(pattern)
+            for match in matches:
+                if self._is_valid_driver_binary(match):
+                    return match
+            
+            # Search deeper (2 levels)
+            pattern = os.path.join(search_dir, '*', '*', binary_name)
+            matches = glob.glob(pattern)
+            for match in matches:
+                if self._is_valid_driver_binary(match):
+                    return match
+        
+        return None
     
     def _get_user_agent(self, agent_type: str = 'default') -> str:
         """Obtém user agent baseado no tipo solicitado."""
@@ -315,6 +452,21 @@ class WebDriverConfig:
                 'javascript_enabled': True,
                 'user_agent_type': 'default',
                 'custom_options': ['--enable-features=NetworkService']
+            },
+            'government_sites': {
+                'disable_images': False,
+                'javascript_enabled': True,
+                'user_agent_type': 'default',
+                'custom_options': [
+                    '--enable-features=NetworkService',
+                    '--disable-features=VizDisplayCompositor',
+                    '--disable-gpu-sandbox',
+                    '--memory-pressure-off',
+                    '--max_old_space_size=4096',
+                    '--disable-software-rasterizer',
+                    '--no-zygote',
+                    '--single-process'
+                ]
             },
             'stealth_scraping': {
                 'disable_images': True,

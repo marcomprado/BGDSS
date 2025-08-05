@@ -29,7 +29,7 @@ class BrazilianSitesTerminal:
         # Site definitions
         self.sites = {
             1: {
-                'name': 'Portal Saude MG - Deliberacoes',
+                'name': 'Portal Saude MG - Resoluções',
                 'url': 'https://portal-antigo.saude.mg.gov.br/deliberacoes/documents?by_year=0&by_month=&by_format=pdf&category_id=4795&ordering=newest&q=',
                 'handler': 'portal_saude_mg'
             },
@@ -75,12 +75,12 @@ class BrazilianSitesTerminal:
         """Show the main menu."""
         self.clear_screen()
         print("========================================")
-        print("    WEB SCRAPER AUTOMATIZADO - IA")
+        print("    WEB SCRAPER AUTOMATIZADO")
         print("========================================")
         print("")
         print("Selecione o site para coleta de dados:")
         print("")
-        print("1. Portal Saude MG - Deliberacoes")
+        print("1. Portal Saude MG - Resoluções")
         print("2. MDS - Parcelas Pagas")
         print("3. MDS - Saldo Detalhado por Conta")
         print("4. Sair")
@@ -103,7 +103,7 @@ class BrazilianSitesTerminal:
         while True:
             self.clear_screen()
             print("========================================")
-            print("   PORTAL SAUDE MG - DELIBERACOES")
+            print("   PORTAL SAUDE MG - RESOLUÇÕES")
             print("========================================")
             print("")
             print("Site: portal-antigo.saude.mg.gov.br/deliberacoes")
@@ -127,13 +127,13 @@ class BrazilianSitesTerminal:
                 continue
             
             print("")
-            print("3. Iniciar coleta")
-            print("4. Voltar ao menu principal")
+            print("1. Iniciar coleta")
+            print("2. Voltar ao menu principal")
             print("")
             
-            choice = self.get_user_input("Digite sua opcao (3-4): ")
+            choice = self.get_user_input("Digite sua opcao (1-2): ")
             
-            if choice == "3":
+            if choice == "1":
                 config = {
                     'site': 'portal_saude_mg',
                     'year': year,
@@ -143,7 +143,7 @@ class BrazilianSitesTerminal:
                 self.current_config = config  # Store config for later reference
                 self.run_scraping_task(config)
                 break
-            elif choice == "4":
+            elif choice == "2":
                 break
             else:
                 self.show_error("Opcao invalida. Tente novamente.")
@@ -191,13 +191,13 @@ class BrazilianSitesTerminal:
                 continue
             
             print("")
-            print("3. Iniciar coleta")
-            print("4. Voltar ao menu principal")
+            print("1. Iniciar coleta")
+            print("2. Voltar ao menu principal")
             print("")
             
-            choice = self.get_user_input("Digite sua opcao (3-4): ")
+            choice = self.get_user_input("Digite sua opcao (1-2): ")
             
-            if choice == "3":
+            if choice == "1":
                 config = {
                     'site': 'mds_parcelas',
                     'year': year,
@@ -207,7 +207,7 @@ class BrazilianSitesTerminal:
                 self.current_config = config  # Store config for later reference
                 self.run_scraping_task(config)
                 break
-            elif choice == "4":
+            elif choice == "2":
                 break
             else:
                 self.show_error("Opcao invalida. Tente novamente.")
@@ -289,10 +289,13 @@ class BrazilianSitesTerminal:
         
         try:
             year = int(year_str)
-            if 2015 <= year <= 2024:
+            # Allow any reasonable year (from 2000 to current year + 20)
+            from datetime import datetime
+            current_year = datetime.now().year
+            if 2000 <= year <= current_year + 20:
                 return year
             else:
-                self.show_error("Ano deve estar entre 2015 e 2024.")
+                self.show_error(f"Ano deve estar entre 2000 e {current_year + 20}.")
                 return None
         except ValueError:
             self.show_error("Ano invalido. Digite um numero.")
@@ -337,7 +340,10 @@ class BrazilianSitesTerminal:
             if config['site'] == 'portal_saude_mg':
                 from src.modules.sites.portal_saude_mg import PortalSaudeMGScraper
                 scraper = PortalSaudeMGScraper()
-                result = scraper.execute_scraping(config)
+                # Convert config to new format
+                ano = str(config['year'])
+                mes = f"{config['month']:02d}" if config.get('month') and config['month'] != 13 else None
+                result = scraper.execute_scraping(ano, mes)
             elif config['site'] == 'mds_parcelas':
                 from src.modules.sites.mds_parcelas import MDSParcelasScraper
                 scraper = MDSParcelasScraper()

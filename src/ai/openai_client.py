@@ -1,5 +1,6 @@
 """
-OpenAI client with retry logic, rate limiting, and error handling.
+OpenAI client for PDF processing - text-only operations with retry logic, rate limiting, and error handling.
+Optimized for document analysis and structured data extraction from PDFs.
 """
 
 import time
@@ -40,41 +41,45 @@ class RateLimiter:
 
 
 class OpenAIClient:
-    """Enhanced OpenAI client with retry logic and error handling."""
+    """OpenAI client optimized for PDF processing and text analysis."""
     
     def __init__(self, api_key: Optional[str] = None, max_retries: int = 3):
         self.api_key = api_key or settings.OPENAI_API_KEY
+        self.max_retries = max_retries
+        self.enabled = False
+        self.client = None
+        
         if not self.api_key:
-            logger.warning("OpenAI API key not provided - AI features will be disabled")
-            self.client = None
-            self.enabled = False
+            logger.warning("OpenAI API key not provided - PDF processing will be disabled")
             return
         
         try:
-            # Try to create OpenAI client with minimal configuration
-            self.client = OpenAI(api_key=self.api_key)
+            # Check if using Open Router (API key starts with sk-or-)
+            if self.api_key and self.api_key.startswith('sk-or-'):
+                # Open Router configuration for text-only models
+                logger.info("Detected Open Router API key, configuring for text processing")
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url="https://openrouter.ai/api/v1"
+                )
+                # Use text-only model for PDF processing
+                self.default_model = "openai/gpt-4o-mini"
+            else:
+                # Standard OpenAI configuration
+                self.client = OpenAI(api_key=self.api_key)
+                self.default_model = settings.OPENAI_MODEL or "gpt-4o-mini"
+            
             self.enabled = True
+            self.default_temperature = settings.OPENAI_TEMPERATURE or 0.1  # Lower temp for structured data
+            self.default_max_tokens = settings.OPENAI_MAX_TOKENS or 4000
+            self._rate_limiter = RateLimiter(max_calls=50, period=60)
+            
+            logger.info(f"OpenAI client initialized for PDF processing with model: {self.default_model}")
+            
         except Exception as e:
-            # If there's an error (like 'proxies' argument), try alternative approach
-            logger.warning(f"Failed to initialize OpenAI client normally: {e}")
-            try:
-                # Set API key directly and create client without arguments
-                openai.api_key = self.api_key
-                self.client = None  # Will use openai module directly
-                self.enabled = True
-                logger.info("Using OpenAI module directly (fallback mode)")
-            except Exception as e2:
-                logger.error(f"Failed to initialize OpenAI client: {e2}")
-                self.client = None
-                self.enabled = False
-        self.max_retries = max_retries
-        self.default_model = settings.OPENAI_MODEL
-        self.default_temperature = settings.OPENAI_TEMPERATURE
-        self.default_max_tokens = settings.OPENAI_MAX_TOKENS
-        
-        self._rate_limiter = RateLimiter(max_calls=50, period=60)
-        
-        logger.info("OpenAI client initialized")
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            self.client = None
+            self.enabled = False
     
     def _handle_api_error(self, error: Exception, attempt: int) -> None:
         """Handle API errors with appropriate logging and raising."""
@@ -119,51 +124,27 @@ class OpenAIClient:
         
         for attempt in range(self.max_retries):
             try:
-                logger.debug(f"Sending chat completion request (attempt {attempt + 1})")
+                if not self.client:
+                    raise AIError("OpenAI client not initialized")
                 
-                if self.client:
-                    # Use new client interface
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        **kwargs
-                    )
-                else:
-                    # Fallback to direct API call
-                    response = openai.ChatCompletion.create(
-                        model=model,
-                        messages=messages,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        **kwargs
-                    )
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    **kwargs
+                )
                 
-                if self.client:
-                    # New client format
-                    result = {
-                        'content': response.choices[0].message.content,
-                        'usage': {
-                            'prompt_tokens': response.usage.prompt_tokens,
-                            'completion_tokens': response.usage.completion_tokens,
-                            'total_tokens': response.usage.total_tokens
-                        },
-                        'model': response.model,
-                        'finish_reason': response.choices[0].finish_reason
-                    }
-                else:
-                    # Legacy format
-                    result = {
-                        'content': response['choices'][0]['message']['content'],
-                        'usage': {
-                            'prompt_tokens': response['usage']['prompt_tokens'],
-                            'completion_tokens': response['usage']['completion_tokens'],
-                            'total_tokens': response['usage']['total_tokens']
-                        },
-                        'model': response.get('model', model),
-                        'finish_reason': response['choices'][0].get('finish_reason', 'stop')
-                    }
+                result = {
+                    'content': response.choices[0].message.content,
+                    'usage': {
+                        'prompt_tokens': response.usage.prompt_tokens,
+                        'completion_tokens': response.usage.completion_tokens,
+                        'total_tokens': response.usage.total_tokens
+                    },
+                    'model': response.model,
+                    'finish_reason': response.choices[0].finish_reason
+                }
                 
                 logger.info(f"Chat completion successful. Tokens used: {result['usage']['total_tokens']}")
                 return result
@@ -188,31 +169,31 @@ class OpenAIClient:
         
         return messages
     
-    def analyze_webpage(self, html_content: str, task_description: str) -> Dict[str, Any]:
-        """Analyze webpage content for specific task."""
+    def analyze_pdf_text(self, pdf_text: str, extraction_goal: str) -> Dict[str, Any]:
+        """Analyze PDF text content for data extraction."""
         if not self.enabled:
             logger.warning("AI analysis not available - returning basic analysis")
             return {
                 'content': 'AI analysis disabled - OpenAI API key not provided',
-                'analysis': 'Basic HTML parsing only',
-                'recommendations': ['Configure OpenAI API key for AI-powered analysis']
+                'analysis': 'Basic text parsing only',
+                'recommendations': ['Configure OpenAI API key for AI-powered PDF analysis']
             }
         
-        system_prompt = """You are a web scraping assistant that analyzes HTML content.
-        Provide clear, structured responses about the webpage content and how to interact with it.
-        Focus on identifying downloadable files, forms, and navigation elements."""
+        system_prompt = """You are a document analysis specialist focused on extracting structured data from PDF documents.
+        Analyze the provided text content and extract relevant information based on the specified goal.
+        Return clear, structured responses with extracted data in a consistent format."""
         
-        user_content = f"""Task: {task_description}
+        user_content = f"""Extraction Goal: {extraction_goal}
         
-        HTML Content (truncated):
-        {html_content[:8000]}
+        PDF Text Content (truncated if necessary):
+        {pdf_text[:15000] if len(pdf_text) > 15000 else pdf_text}
         
-        Please analyze this webpage and provide:
-        1. Summary of the page content
-        2. Downloadable files found (if any)
-        3. Forms and input fields
-        4. Navigation recommendations
-        5. Any potential issues or warnings"""
+        Please analyze this PDF content and provide:
+        1. Document type and structure summary
+        2. Key data fields identified
+        3. Extracted structured data
+        4. Data quality assessment
+        5. Any extraction issues or recommendations"""
         
         messages = self.create_prompt(system_prompt, user_content)
         return self.chat_completion(messages)
@@ -259,40 +240,134 @@ class OpenAIClient:
             logger.error("Failed to parse JSON response from AI")
             return {'error': 'Failed to parse response', 'raw_content': response['content']}
     
-    def generate_navigation_instructions(self,
-                                       current_state: str,
-                                       target_goal: str,
-                                       available_actions: List[str]) -> str:
-        """Generate step-by-step navigation instructions."""
-        system_prompt = """You are a web navigation expert.
-        Provide clear, actionable instructions for navigating websites.
-        Be specific about which elements to click and what to look for."""
+    def extract_pdf_metadata(self, pdf_text: str) -> Dict[str, Any]:
+        """Extract metadata and document information from PDF text."""
+        if not self.enabled:
+            return {'error': 'AI analysis disabled'}
         
-        user_content = f"""Current State: {current_state}
+        system_prompt = """You are a document metadata extraction specialist.
+        Extract key metadata and document information from PDF text content.
+        Focus on dates, document types, organizations, locations, and other identifying information."""
         
-        Goal: {target_goal}
+        user_content = f"""PDF Text Content:
+        {pdf_text[:10000] if len(pdf_text) > 10000 else pdf_text}
         
-        Available Actions:
-        {chr(10).join([f"- {action}" for action in available_actions])}
-        
-        Provide step-by-step instructions to reach the goal."""
+        Extract the following metadata (return as JSON):
+        - document_type: Type of document
+        - date_created: Document creation date
+        - date_period: Time period the document covers
+        - organization: Issuing organization
+        - location: Geographic location mentioned
+        - key_subjects: Main topics/subjects
+        - document_id: Any ID numbers found
+        - language: Document language"""
         
         messages = self.create_prompt(system_prompt, user_content)
-        response = self.chat_completion(messages, temperature=0.3)
+        response = self.chat_completion(
+            messages,
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
         
-        return response['content']
+        try:
+            import json
+            return json.loads(response['content'])
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON response from AI")
+            return {'error': 'Failed to parse response', 'raw_content': response['content']}
+    
+    def process_brazilian_government_pdf(self, pdf_text: str, document_type: str) -> Dict[str, Any]:
+        """Process Brazilian government PDFs with domain-specific knowledge."""
+        if not self.enabled:
+            return {'error': 'AI processing disabled'}
+        
+        system_prompt = f"""You are a specialist in Brazilian government documents with expertise in {document_type}.
+        Extract structured data from Brazilian government PDFs following Brazilian administrative standards.
+        Pay attention to Brazilian date formats (DD/MM/YYYY), currency (R$), legal references, and administrative terminology.
+        Return data in a structured JSON format suitable for database storage."""
+        
+        # Customize extraction based on document type
+        if document_type.lower() in ['resolucao', 'deliberacao']:
+            extraction_fields = """
+            - numero_resolucao: Resolution number
+            - data_publicacao: Publication date (DD/MM/YYYY)
+            - orgao_emissor: Issuing government body
+            - assunto: Subject/topic
+            - categoria: Category of resolution
+            - vigencia: Validity period
+            - referencias_legais: Legal references cited
+            """
+        elif document_type.lower() in ['parcelas', 'pagamento']:
+            extraction_fields = """
+            - municipio: Municipality name
+            - valor_parcela: Payment amount (R$)
+            - data_pagamento: Payment date (DD/MM/YYYY)
+            - programa: Program name
+            - beneficiario: Beneficiary
+            - ano_exercicio: Fiscal year
+            - mes_referencia: Reference month
+            """
+        elif document_type.lower() in ['saldo', 'balanco']:
+            extraction_fields = """
+            - municipio: Municipality name
+            - conta: Account name/type
+            - saldo_anterior: Previous balance (R$)
+            - creditos: Credits (R$)
+            - debitos: Debits (R$)
+            - saldo_atual: Current balance (R$)
+            - data_referencia: Reference date (DD/MM/YYYY)
+            """
+        else:
+            extraction_fields = """
+            - tipo_documento: Document type
+            - numero_documento: Document number
+            - data: Date (DD/MM/YYYY)
+            - orgao: Government body
+            - valor: Amount if applicable (R$)
+            - municipio: Municipality if applicable
+            """
+        
+        user_content = f"""Document Type: {document_type}
+        
+        PDF Text Content:
+        {pdf_text[:20000] if len(pdf_text) > 20000 else pdf_text}
+        
+        Extract the following structured data as JSON:
+        {extraction_fields}
+        
+        Additional metadata:
+        - data_extracao: Current date
+        - confianca_extracao: Confidence level (1-10)
+        - observacoes: Any extraction notes"""
+        
+        messages = self.create_prompt(system_prompt, user_content)
+        response = self.chat_completion(
+            messages,
+            temperature=0.05,  # Very low temperature for accuracy
+            response_format={"type": "json_object"}
+        )
+        
+        try:
+            import json
+            from datetime import datetime
+            result = json.loads(response['content'])
+            result['data_extracao'] = datetime.now().isoformat()
+            return result
+        except json.JSONDecodeError:
+            logger.error("Failed to parse JSON response from AI")
+            return {'error': 'Failed to parse response', 'raw_content': response['content']}
     
     def validate_extraction_result(self,
                                   extracted_data: Dict[str, Any],
                                   validation_rules: Dict[str, str]) -> Dict[str, Any]:
         """Validate extracted data against rules."""
-        system_prompt = """You are a data validation specialist.
-        Check if the extracted data meets the validation requirements.
-        Provide detailed feedback on any issues found."""
+        system_prompt = """You are a data validation specialist for Brazilian government documents.
+        Check if the extracted data meets validation requirements and Brazilian data standards.
+        Validate date formats (DD/MM/YYYY), currency formats (R$), and administrative data quality."""
         
         rules_str = "\n".join([f"- {field}: {rule}" for field, rule in validation_rules.items()])
         
-        user_content = f"""Validate this data:
+        user_content = f"""Validate this Brazilian government data:
         
         Data:
         {extracted_data}
@@ -300,19 +375,31 @@ class OpenAIClient:
         Validation Rules:
         {rules_str}
         
-        Return a validation report with:
-        1. Overall validity (true/false)
-        2. Field-by-field validation results
-        3. Specific issues found
-        4. Suggestions for correction"""
+        Return a validation report as JSON with:
+        - valido: Overall validity (true/false)
+        - campos_validos: Field-by-field validation results
+        - problemas_encontrados: Specific issues found
+        - sugestoes_correcao: Suggestions for correction
+        - nota_qualidade: Data quality score (1-10)"""
         
         messages = self.create_prompt(system_prompt, user_content)
-        response = self.chat_completion(messages, temperature=0.1)
+        response = self.chat_completion(
+            messages, 
+            temperature=0.1,
+            response_format={"type": "json_object"}
+        )
         
-        return {
-            'validation_report': response['content'],
-            'tokens_used': response['usage']['total_tokens']
-        }
+        try:
+            import json
+            validation_result = json.loads(response['content'])
+            validation_result['tokens_used'] = response['usage']['total_tokens']
+            return validation_result
+        except json.JSONDecodeError:
+            return {
+                'error': 'Failed to parse validation response',
+                'raw_content': response['content'],
+                'tokens_used': response['usage']['total_tokens']
+            }
     
     def get_token_count(self, text: str) -> int:
         """Estimate token count for a text string."""
