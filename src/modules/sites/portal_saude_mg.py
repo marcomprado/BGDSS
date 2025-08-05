@@ -167,11 +167,6 @@ class PortalSaudeMGScraper:
             logger.warning(f"Erro na verificação da página: {e}")
             return False
     
-    
-    
-    
-    
-    
     def _initialize_browser(self, ano: str, mes: str = None):
         """Initialize browser with proper configurations"""
         try:
@@ -275,11 +270,6 @@ class PortalSaudeMGScraper:
             logger.error(error_msg)
             raise
     
-    # REMOVED: _fill_search_term method - no longer needed since 'reso' is in base URL
-    # This method was causing stale element reference errors after year/month selection
-    # def _fill_search_term(self):
-    #     """Fill search term with fixed value 'Resolução' using input[name="q"]"""
-    #     # This method is no longer used - search term is already in the URL
     
     def _execute_search(self):
         """Execute search - since filters are applied via URL, just wait for page to load"""
@@ -291,12 +281,6 @@ class PortalSaudeMGScraper:
             return
         
         raise Exception("Falha ao carregar página com filtros")
-    
-    
-    
-    
-    
-    
     
     def _wait_for_search_results(self) -> bool:
         """Wait for search results to appear"""
@@ -387,9 +371,6 @@ class PortalSaudeMGScraper:
                 return len(results)
             except:
                 return 0
-    
-    
-    
     
     def _collect_pdf_links(self) -> List[Dict[str, str]]:
         """Collect all PDF links using exact selector: h2.title > a"""
@@ -487,14 +468,13 @@ class PortalSaudeMGScraper:
             else:
                 filename = f"{ano}-RES-{download_order:03d}.pdf"
             
-            logger.debug(f"📄 Arquivo #{download_order}: '{filename}'")
+            logger.debug(f"Arquivo #{download_order}: '{filename}'")
             return filename
             
         except Exception as e:
             logger.warning(f"Erro ao criar nome do arquivo: {e}")
             return f"{ano}-RES-{download_order:03d}.pdf"
     
-    # REMOVED: Complex filename methods - simplified to sequential numbering per user request
     
     def _download_file_with_retries(self, url: str, filepath: Path, max_retries: int = 3) -> bool:
         """Download file with retry logic"""
