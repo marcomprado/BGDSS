@@ -296,11 +296,27 @@ Proceda com a análise e retorne os dados no formato JSON especificado."""
             return extracted_data
             
         except json.JSONDecodeError as e:
+            # Get the actual response content for debugging
+            raw_content = response.get('content', '') if 'response' in locals() else ''
+            content_preview = raw_content[:200] if raw_content else 'EMPTY RESPONSE'
+            
             error_msg = f"Failed to parse AI response as JSON: {e}"
-            logger.error(error_msg)
+            logger.error(f"{error_msg}")
+            logger.error(f"Response content preview: {content_preview}")
+            logger.error(f"Response length: {len(raw_content)} characters")
+            
+            if 'response' in locals():
+                logger.error(f"Token usage: {response.get('usage', {})}")
+                logger.error(f"Finish reason: {response.get('finish_reason', 'unknown')}")
+            
             return {
                 'error': error_msg,
-                'raw_content': response.get('content', '') if 'response' in locals() else ''
+                'raw_content': raw_content,
+                'debug_info': {
+                    'content_length': len(raw_content),
+                    'token_usage': response.get('usage', {}) if 'response' in locals() else {},
+                    'finish_reason': response.get('finish_reason', 'unknown') if 'response' in locals() else 'unknown'
+                }
             }
             
         except Exception as e:

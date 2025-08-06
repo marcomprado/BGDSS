@@ -71,7 +71,7 @@ class OpenAIClient:
             
             self.enabled = True
             self.default_temperature = settings.OPENAI_TEMPERATURE or 0.1  # Lower temp for structured data
-            self.default_max_tokens = settings.OPENAI_MAX_TOKENS or 4000
+            self.default_max_tokens = settings.OPENAI_MAX_TOKENS or 5000
             self._rate_limiter = RateLimiter(max_calls=50, period=60)
             
             logger.info(f"OpenAI client initialized for PDF processing with model: {self.default_model}")

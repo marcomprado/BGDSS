@@ -8,3 +8,5 @@ downloads/
 logs/
 .vscode/
 .idea/
+.claude
+CLAUDE.md
