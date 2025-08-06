@@ -108,14 +108,19 @@ class PortalSaudeMGScraper:
             
             # 7. Calculate results
             duration = (datetime.now() - start_time).total_seconds() / 60
-            total_size_mb = sum(os.path.getsize(f) for f in downloaded_files if os.path.exists(f)) / (1024 * 1024)
+            total_size_mb = sum(os.path.getsize(file_info['file_path']) for file_info in downloaded_files if os.path.exists(file_info['file_path'])) / (1024 * 1024)
+            
+            # 8. Save URL mapping for PDF processing
+            download_path = self._get_download_path(ano, mes)
+            url_mapping = self._save_url_mapping(downloaded_files, download_path)
             
             result = {
                 "success": True,
                 "files_downloaded": downloaded_files,
                 "total_files": len(pdf_links),
                 "duration_minutes": duration,
-                "download_path": str(self._get_download_path(ano, mes)),
+                "download_path": str(download_path),
+                "url_mapping_file": url_mapping,
                 "total_size_mb": total_size_mb,
                 "errors": errors
             }
@@ -416,7 +421,7 @@ class PortalSaudeMGScraper:
             logger.error(error_msg)
             return []
     
-    def _download_all_pdfs(self, pdf_links: List[Dict[str, str]], ano: str, mes: str = None) -> List[str]:
+    def _download_all_pdfs(self, pdf_links: List[Dict[str, str]], ano: str, mes: str = None) -> List[Dict[str, str]]:
         """Download all PDFs with sequential naming: [mes]-[ano]-RES-[numero_ordem_de_download]"""
         downloaded_files = []
         download_path = self._get_download_path(ano, mes)
@@ -434,14 +439,22 @@ class PortalSaudeMGScraper:
                 # Check if file already exists
                 if filepath.exists():
                     logger.info(f"Arquivo já existe no disco, pulando: {filename}")
-                    downloaded_files.append(str(filepath))
+                    downloaded_files.append({
+                        'file_path': str(filepath),
+                        'url': pdf_info['url'],
+                        'title': pdf_info['title']
+                    })
                     continue
                 
                 # Download with retries
                 if self._download_file_with_retries(pdf_info['url'], filepath):
                     # Validate PDF file
                     if self._validate_pdf_file(filepath):
-                        downloaded_files.append(str(filepath))
+                        downloaded_files.append({
+                            'file_path': str(filepath),
+                            'url': pdf_info['url'],
+                            'title': pdf_info['title']
+                        })
                         logger.info(f"Download concluído com sucesso: {filename}")
                     else:
                         logger.error(f"Arquivo PDF corrompido ou inválido: {filename}")
@@ -732,3 +745,41 @@ class PortalSaudeMGScraper:
                 'error': str(e),
                 'checked_at': datetime.now().isoformat()
             }
+    
+    def _save_url_mapping(self, downloaded_files: List[Dict[str, str]], download_path: Path) -> str:
+        """
+        Save URL mapping to a JSON file for PDF processor to use.
+        
+        Args:
+            downloaded_files: List of file info dictionaries
+            download_path: Path where files were downloaded
+            
+        Returns:
+            Path to the saved URL mapping file
+        """
+        try:
+            import json
+            from pathlib import Path
+            
+            # Create mapping from filename to URL
+            url_mapping = {}
+            for file_info in downloaded_files:
+                file_path = Path(file_info['file_path'])
+                filename = file_path.name
+                url_mapping[filename] = {
+                    'url': file_info['url'],
+                    'title': file_info['title'],
+                    'full_path': str(file_path)
+                }
+            
+            # Save to JSON file in the same directory
+            mapping_file = download_path / 'url_mapping.json'
+            with open(mapping_file, 'w', encoding='utf-8') as f:
+                json.dump(url_mapping, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"URL mapping saved to: {mapping_file}")
+            return str(mapping_file)
+            
+        except Exception as e:
+            logger.error(f"Failed to save URL mapping: {e}")
+            return ""

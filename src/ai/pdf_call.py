@@ -46,7 +46,7 @@ class PDFProcessor:
         
         Args:
             pdf_path: Path to the PDF file
-            file_link: Optional direct link to the PDF (will be handled later)
+            file_link: Optional direct link to the PDF from web scraper
             
         Returns:
             Dict containing extracted structured data or error information
@@ -91,11 +91,21 @@ class PDFProcessor:
                     'ai_response': extracted_data.get('raw_content', '')
                 }
             
+            # Add categorization based on budget allocation
+            if 'dotacao_orcamentaria' in extracted_data:
+                extracted_data['abreviacao'] = self._categorize_by_budget_allocation(extracted_data['dotacao_orcamentaria'])
+            else:
+                extracted_data['abreviacao'] = "NÃO CLASSIFICADO"
+            
+            # Add link information
+            extracted_data['link'] = file_link or "NÃO INFORMADO"
+            
             # Add metadata
             result = {
                 'success': True,
                 'file_path': str(pdf_path),
                 'file_name': pdf_file.name,
+                'file_link': file_link,
                 'text_length': len(pdf_text),
                 'extracted_data': extracted_data
             }
@@ -137,7 +147,12 @@ class PDFProcessor:
             logger.warning(f"No PDF files found in directory: {pdf_directory}")
             return []
         
+        # Try to load URL mapping if it exists
+        url_mapping = self._load_url_mapping(pdf_dir)
+        
         logger.info(f"Processing {len(pdf_files)} PDF files from {pdf_directory}")
+        if url_mapping:
+            logger.info(f"URL mapping loaded with {len(url_mapping)} entries")
         
         results = []
         successful_count = 0
@@ -145,7 +160,13 @@ class PDFProcessor:
         for i, pdf_file in enumerate(pdf_files, 1):
             logger.info(f"Processing file {i}/{len(pdf_files)}: {pdf_file.name}")
             
-            result = self.process_single_pdf(str(pdf_file))
+            # Get URL for this file if available
+            file_url = None
+            if url_mapping and pdf_file.name in url_mapping:
+                file_url = url_mapping[pdf_file.name]['url']
+                logger.debug(f"Found URL for {pdf_file.name}: {file_url}")
+            
+            result = self.process_single_pdf(str(pdf_file), file_link=file_url)
             results.append(result)
             
             if result.get('success', False):
@@ -292,7 +313,8 @@ DADOS A EXTRAIR:
 7. DOTAÇÃO ORÇAMENTÁRIA
 • Descrição: Conjunto numérico que segue imediatamente após a expressão "dotação orçamentária"
 • Formato: Sequência de números, pontos e traços (ex: "12.345.67.89.123")
-• Retornar: Apenas os números/códigos da dotação
+• Atenção especial: Procurar pelos códigos 301, 302, 303, 304, 305, 306, 122, 242 dentro da dotação
+• Retornar: Toda a sequência numérica da dotação orçamentária completa
 
 FORMATO DE RESPOSTA:
 Retorne os dados extraídos no seguinte formato JSON:
@@ -305,6 +327,8 @@ Retorne os dados extraídos no seguinte formato JSON:
   "vedado_utilizacao": "",
   "dotacao_orcamentaria": ""
 }
+
+NOTA IMPORTANTE: Os campos "link" e "abreviacao" são adicionados automaticamente pelo sistema após a extração.
 
 OBSERVAÇÕES IMPORTANTES:
 • Mantenha fidelidade absoluta ao texto original
@@ -346,7 +370,8 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
         
         required_fields = [
             'numero_resolucao', 'relacionada', 'objeto', 'data_inicial',
-            'prazo_execucao', 'vedado_utilizacao', 'dotacao_orcamentaria'
+            'prazo_execucao', 'vedado_utilizacao', 'dotacao_orcamentaria',
+            'link', 'abreviacao'
         ]
         
         # Check for missing fields
@@ -382,3 +407,66 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
         import re
         pattern = r'^\d{2}/\d{2}/\d{4}$'
         return bool(re.match(pattern, date_str))
+    
+    def _categorize_by_budget_allocation(self, dotacao_orcamentaria: str) -> str:
+        """
+        Categorize resolution based on budget allocation number.
+        
+        Args:
+            dotacao_orcamentaria: Budget allocation number string
+            
+        Returns:
+            Category abbreviation based on mapping table
+        """
+        # Budget allocation to category mapping
+        category_mapping = {
+            '301': 'Atenção Primária',
+            '302': 'MAC',
+            '303': 'Assistência Farmacêutica', 
+            '304': 'Vigilância Sanitária',
+            '305': 'Vigilância Epidemiológica',
+            '306': 'Alimentação e Nutrição',
+            '122': 'ADM',
+            '242': 'Assist. ao Portador de Deficiência'
+        }
+        
+        if not dotacao_orcamentaria or dotacao_orcamentaria == "NÃO INFORMADO":
+            return "NÃO CLASSIFICADO"
+        
+        # Extract 3-digit codes from budget allocation number
+        import re
+        # Look for 3-digit patterns in the budget allocation
+        matches = re.findall(r'\b(301|302|303|304|305|306|122|242)\b', dotacao_orcamentaria)
+        
+        if matches:
+            # Return category for the first matching code found
+            return category_mapping.get(matches[0], "NÃO CLASSIFICADO")
+        
+        return "NÃO CLASSIFICADO"
+    
+    def _load_url_mapping(self, pdf_directory: Path) -> Optional[Dict[str, Dict[str, str]]]:
+        """
+        Load URL mapping from JSON file if it exists.
+        
+        Args:
+            pdf_directory: Path to directory containing PDFs
+            
+        Returns:
+            URL mapping dictionary or None if not found
+        """
+        try:
+            mapping_file = pdf_directory / 'url_mapping.json'
+            if not mapping_file.exists():
+                logger.debug(f"URL mapping file not found: {mapping_file}")
+                return None
+            
+            import json
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                url_mapping = json.load(f)
+            
+            logger.info(f"URL mapping loaded successfully from: {mapping_file}")
+            return url_mapping
+            
+        except Exception as e:
+            logger.warning(f"Failed to load URL mapping: {e}")
+            return None

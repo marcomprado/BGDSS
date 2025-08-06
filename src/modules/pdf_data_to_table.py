@@ -37,7 +37,9 @@ class PDFTableGenerator:
             'data_inicial',
             'prazo_execucao',
             'vedado_utilizacao',
-            'dotacao_orcamentaria'
+            'dotacao_orcamentaria',
+            'link',
+            'abreviacao'
         ]
         
         self.column_names_pt = {
@@ -47,7 +49,9 @@ class PDFTableGenerator:
             'data_inicial': 'Data Inicial',
             'prazo_execucao': 'Prazo Execução',
             'vedado_utilizacao': 'Vedado a Utilização',
-            'dotacao_orcamentaria': 'Dotação Orçamentária'
+            'dotacao_orcamentaria': 'Dotação Orçamentária',
+            'link': 'Link',
+            'abreviacao': 'Abreviação'
         }
     
     def process_pdf_directory_to_table(self, pdf_directory: str, api_key: Optional[str] = None) -> Dict[str, Any]:
@@ -312,6 +316,8 @@ class PDFTableGenerator:
                     'Resoluções com Vedações',
                     'Resoluções com Dotação Orçamentária',
                     'Resoluções Relacionadas a Outras',
+                    'Resoluções com Link Disponível',
+                    'Resoluções Classificadas por Categoria',
                     'Data de Processamento'
                 ],
                 'Valor': [
@@ -321,6 +327,8 @@ class PDFTableGenerator:
                     len(df[df['Vedado a Utilização'] != 'NÃO INFORMADO']),
                     len(df[df['Dotação Orçamentária'] != 'NÃO INFORMADO']),
                     len(df[df['Relacionada'] != 'NÃO INFORMADO']),
+                    len(df[df['Link'] != 'NÃO INFORMADO']),
+                    len(df[df['Abreviação'] != 'NÃO CLASSIFICADO']),
                     datetime.now().strftime('%d/%m/%Y %H:%M:%S')
                 ]
             }

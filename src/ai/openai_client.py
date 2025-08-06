@@ -63,11 +63,11 @@ class OpenAIClient:
                     base_url="https://openrouter.ai/api/v1"
                 )
                 # Use text-only model for PDF processing
-                self.default_model = "openai/gpt-4o-mini"
+                self.default_model = "openai/gpt-oss-20b"
             else:
                 # Standard OpenAI configuration
                 self.client = OpenAI(api_key=self.api_key)
-                self.default_model = settings.OPENAI_MODEL or "gpt-4o-mini"
+                self.default_model = settings.OPENAI_MODEL or "gpt-oss-20b"
             
             self.enabled = True
             self.default_temperature = settings.OPENAI_TEMPERATURE or 0.1  # Lower temp for structured data
@@ -127,11 +127,21 @@ class OpenAIClient:
                 if not self.client:
                     raise AIError("OpenAI client not initialized")
                 
+                # Add provider preferences for OpenRouter
+                extra_params = {}
+                if self.api_key and self.api_key.startswith('sk-or-'):
+                    extra_params['extra_body'] = {
+                        "provider": {
+                            "only": ["Groq"]
+                        }
+                    }
+                
                 response = self.client.chat.completions.create(
                     model=model,
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    **extra_params,
                     **kwargs
                 )
                 
