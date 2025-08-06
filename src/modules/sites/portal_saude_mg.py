@@ -748,7 +748,7 @@ class PortalSaudeMGScraper:
     
     def _save_url_mapping(self, downloaded_files: List[Dict[str, str]], download_path: Path) -> str:
         """
-        Save URL mapping to a JSON file for PDF processor to use.
+        Save URL mapping to a JSON file for PDF processor to use with atomic write operation.
         
         Args:
             downloaded_files: List of file info dictionaries
@@ -759,6 +759,8 @@ class PortalSaudeMGScraper:
         """
         try:
             import json
+            import tempfile
+            import shutil
             from pathlib import Path
             
             # Create mapping from filename to URL
@@ -772,14 +774,28 @@ class PortalSaudeMGScraper:
                     'full_path': str(file_path)
                 }
             
-            # Save to JSON file in the same directory
             mapping_file = download_path / 'url_mapping.json'
-            with open(mapping_file, 'w', encoding='utf-8') as f:
-                json.dump(url_mapping, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"URL mapping saved to: {mapping_file}")
+            # Atomic write using temporary file to prevent race conditions
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, 
+                                           dir=download_path, 
+                                           suffix='.tmp',
+                                           encoding='utf-8') as tmp_file:
+                json.dump(url_mapping, tmp_file, ensure_ascii=False, indent=2)
+                tmp_name = tmp_file.name
+            
+            # Atomic rename operation
+            shutil.move(tmp_name, mapping_file)
+            
+            logger.info(f"URL mapping saved atomically to: {mapping_file}")
             return str(mapping_file)
             
         except Exception as e:
             logger.error(f"Failed to save URL mapping: {e}")
+            # Clean up temporary file if it exists
+            if 'tmp_name' in locals() and Path(tmp_name).exists():
+                try:
+                    Path(tmp_name).unlink()
+                except Exception:
+                    pass  # Best effort cleanup
             return ""

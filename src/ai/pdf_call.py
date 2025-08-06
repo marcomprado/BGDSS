@@ -10,13 +10,15 @@ It includes functionality for:
 """
 
 import json
-from typing import Dict, Any, Optional, List
+import re
+from typing import Dict, Any, Optional, List, Pattern
 from pathlib import Path
 import pymupdf4llm
 
 from src.ai.openai_client import OpenAIClient
 from src.utils.logger import logger
 from src.utils.exceptions import AIError
+from src.utils.validators import validators
 
 
 class PDFProcessor:
@@ -124,12 +126,13 @@ class PDFProcessor:
                 'file_path': str(pdf_path)
             }
     
-    def process_pdf_batch(self, pdf_directory: str) -> List[Dict[str, Any]]:
+    def process_pdf_batch(self, pdf_directory: str, batch_size: int = 10) -> List[Dict[str, Any]]:
         """
-        Process all PDF files in a directory.
+        Process PDF files in batches to manage memory efficiently.
         
         Args:
             pdf_directory: Path to directory containing PDF files
+            batch_size: Number of PDFs to process in each batch (default: 10)
             
         Returns:
             List of processing results for each PDF
@@ -150,27 +153,53 @@ class PDFProcessor:
         # Try to load URL mapping if it exists
         url_mapping = self._load_url_mapping(pdf_dir)
         
-        logger.info(f"Processing {len(pdf_files)} PDF files from {pdf_directory}")
+        logger.info(f"Processing {len(pdf_files)} PDF files from {pdf_directory} in batches of {batch_size}")
         if url_mapping:
             logger.info(f"URL mapping loaded with {len(url_mapping)} entries")
         
         results = []
         successful_count = 0
         
-        for i, pdf_file in enumerate(pdf_files, 1):
-            logger.info(f"Processing file {i}/{len(pdf_files)}: {pdf_file.name}")
+        # Process in batches to manage memory
+        for batch_start in range(0, len(pdf_files), batch_size):
+            batch_end = min(batch_start + batch_size, len(pdf_files))
+            batch_files = pdf_files[batch_start:batch_end]
+            batch_num = (batch_start // batch_size) + 1
+            total_batches = (len(pdf_files) + batch_size - 1) // batch_size
             
-            # Get URL for this file if available
-            file_url = None
-            if url_mapping and pdf_file.name in url_mapping:
-                file_url = url_mapping[pdf_file.name]['url']
-                logger.debug(f"Found URL for {pdf_file.name}: {file_url}")
+            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch_files)} files)")
             
-            result = self.process_single_pdf(str(pdf_file), file_link=file_url)
-            results.append(result)
+            batch_results = []
+            for i, pdf_file in enumerate(batch_files):
+                global_index = batch_start + i + 1
+                logger.info(f"Processing file {global_index}/{len(pdf_files)}: {pdf_file.name}")
+                
+                # Get URL for this file if available
+                file_url = None
+                if url_mapping and pdf_file.name in url_mapping:
+                    file_url = url_mapping[pdf_file.name]['url']
+                    logger.debug(f"Found URL for {pdf_file.name}: {file_url}")
+                
+                result = self.process_single_pdf(str(pdf_file), file_link=file_url)
+                batch_results.append(result)
+                
+                if result.get('success', False):
+                    successful_count += 1
+                
+                # Clean up large text data from memory after processing
+                if 'extracted_data' in result and len(str(result)) > 10000:
+                    # Keep essential data, clear potentially large fields
+                    if 'raw_text' in result:
+                        del result['raw_text']
             
-            if result.get('success', False):
-                successful_count += 1
+            results.extend(batch_results)
+            
+            # Log batch completion and memory status
+            logger.info(f"Batch {batch_num} complete. Success rate: {len([r for r in batch_results if r.get('success', False)])}/{len(batch_results)}")
+            
+            # Optional: Save intermediate results periodically
+            if len(results) % 50 == 0:
+                self._save_intermediate_results(results, pdf_dir)
         
         logger.info(f"Batch processing complete: {successful_count}/{len(pdf_files)} files processed successfully")
         
@@ -188,6 +217,17 @@ class PDFProcessor:
         """
         try:
             logger.debug(f"Extracting text from: {pdf_path.name}")
+            
+            # Validate file exists and has reasonable size
+            if not pdf_path.exists():
+                raise FileNotFoundError(f"PDF file does not exist: {pdf_path}")
+                
+            file_size = pdf_path.stat().st_size
+            if file_size == 0:
+                raise ValueError(f"PDF file is empty: {pdf_path}")
+            elif file_size > 50 * 1024 * 1024:  # 50MB limit
+                logger.warning(f"Large PDF file ({file_size / 1024 / 1024:.1f}MB): {pdf_path.name}")
+            
             text = pymupdf4llm.to_markdown(str(pdf_path))
             
             if text:
@@ -197,6 +237,15 @@ class PDFProcessor:
                 logger.warning(f"No text extracted from PDF: {pdf_path.name}")
                 return ""
                 
+        except FileNotFoundError as e:
+            logger.error(f"PDF file not found: {e}")
+            return ""
+        except PermissionError as e:
+            logger.error(f"Permission denied accessing PDF {pdf_path.name}: {e}")
+            return ""
+        except ValueError as e:
+            logger.error(f"Invalid PDF file {pdf_path.name}: {e}")
+            return ""
         except Exception as e:
             logger.error(f"Failed to extract text from PDF {pdf_path.name}: {e}")
             return ""
@@ -398,15 +447,11 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
     
     def _validate_resolution_number_format(self, number: str) -> bool:
         """Validate resolution number format (xxxxx/20XX)"""
-        import re
-        pattern = r'^\d{1,5}/20\d{2}$'
-        return bool(re.match(pattern, number))
+        return validators.validate_resolution_number(number)
     
     def _validate_date_format(self, date_str: str) -> bool:
         """Validate Brazilian date format (DD/MM/AAAA)"""
-        import re
-        pattern = r'^\d{2}/\d{2}/\d{4}$'
-        return bool(re.match(pattern, date_str))
+        return validators.validate_brazilian_date(date_str)
     
     def _categorize_by_budget_allocation(self, dotacao_orcamentaria: str) -> str:
         """
@@ -418,31 +463,7 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
         Returns:
             Category abbreviation based on mapping table
         """
-        # Budget allocation to category mapping
-        category_mapping = {
-            '301': 'Atenção Primária',
-            '302': 'MAC',
-            '303': 'Assistência Farmacêutica', 
-            '304': 'Vigilância Sanitária',
-            '305': 'Vigilância Epidemiológica',
-            '306': 'Alimentação e Nutrição',
-            '122': 'ADM',
-            '242': 'Assist. ao Portador de Deficiência'
-        }
-        
-        if not dotacao_orcamentaria or dotacao_orcamentaria == "NÃO INFORMADO":
-            return "NÃO CLASSIFICADO"
-        
-        # Extract 3-digit codes from budget allocation number
-        import re
-        # Look for 3-digit patterns in the budget allocation
-        matches = re.findall(r'\b(301|302|303|304|305|306|122|242)\b', dotacao_orcamentaria)
-        
-        if matches:
-            # Return category for the first matching code found
-            return category_mapping.get(matches[0], "NÃO CLASSIFICADO")
-        
-        return "NÃO CLASSIFICADO"
+        return validators.categorize_by_budget_allocation(dotacao_orcamentaria)
     
     def _load_url_mapping(self, pdf_directory: Path) -> Optional[Dict[str, Dict[str, str]]]:
         """
@@ -464,9 +485,64 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
             with open(mapping_file, 'r', encoding='utf-8') as f:
                 url_mapping = json.load(f)
             
-            logger.info(f"URL mapping loaded successfully from: {mapping_file}")
+            # Validate that the loaded data is properly structured
+            if not isinstance(url_mapping, dict):
+                logger.warning(f"Invalid URL mapping format: expected dict, got {type(url_mapping)}")
+                return None
+                
+            # Validate structure of first entry if available
+            if url_mapping:
+                first_key = next(iter(url_mapping))
+                first_entry = url_mapping[first_key]
+                if not isinstance(first_entry, dict) or 'url' not in first_entry:
+                    logger.warning("Invalid URL mapping entry structure")
+                    return None
+            
+            logger.info(f"URL mapping loaded successfully from: {mapping_file} ({len(url_mapping)} entries)")
             return url_mapping
             
-        except Exception as e:
-            logger.warning(f"Failed to load URL mapping: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in URL mapping file: {e}")
             return None
+        except PermissionError as e:
+            logger.error(f"Permission denied reading URL mapping file: {e}")
+            return None
+        except UnicodeDecodeError as e:
+            logger.error(f"Encoding error reading URL mapping file: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error loading URL mapping: {e}")
+            return None
+    
+    def _save_intermediate_results(self, results: List[Dict[str, Any]], pdf_dir: Path) -> None:
+        """
+        Save intermediate processing results to prevent data loss.
+        
+        Args:
+            results: Current processing results
+            pdf_dir: Directory containing PDFs
+        """
+        try:
+            import json
+            from datetime import datetime
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            intermediate_file = pdf_dir / f'intermediate_results_{timestamp}.json'
+            
+            # Create a summary of results to save space
+            summary = {
+                'timestamp': timestamp,
+                'total_processed': len(results),
+                'successful': len([r for r in results if r.get('success', False)]),
+                'failed': len([r for r in results if not r.get('success', False)]),
+                'results': results  # Full results for recovery
+            }
+            
+            with open(intermediate_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
+            
+            logger.debug(f"Intermediate results saved to: {intermediate_file}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to save intermediate results: {e}")
+            # Don't fail the main process for this
