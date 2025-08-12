@@ -48,36 +48,58 @@ class OpenAIClient:
         self.max_retries = max_retries
         self.enabled = False
         self.client = None
+        self.provider = settings.AI_PROVIDER
+        self.provider_config = None
         
         if not self.api_key:
             logger.warning("OpenAI API key not provided - PDF processing will be disabled")
             return
         
         try:
-            # Check if using Open Router (API key starts with sk-or-)
-            if self.api_key and self.api_key.startswith('sk-or-'):
-                # Open Router configuration for text-only models
-                logger.info("Detected Open Router API key, configuring for text processing")
+            # Parse provider config if available
+            if settings.AI_PROVIDER_CONFIG:
+                import json
+                try:
+                    self.provider_config = json.loads(settings.AI_PROVIDER_CONFIG)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid AI_PROVIDER_CONFIG JSON: {settings.AI_PROVIDER_CONFIG}")
+            
+            # Configure client based on provider
+            if self.provider == 'openrouter':
+                # OpenRouter configuration
+                base_url = settings.AI_BASE_URL or "https://openrouter.ai/api/v1"
+                logger.info(f"Configuring OpenRouter client with base URL: {base_url}")
                 self.client = OpenAI(
                     api_key=self.api_key,
-                    base_url="https://openrouter.ai/api/v1"
+                    base_url=base_url
                 )
-                # Use text-only model for PDF processing
-                self.default_model = "openai/gpt-oss-20b"
+            elif settings.AI_BASE_URL:
+                # Custom provider with base URL
+                logger.info(f"Configuring custom AI provider with base URL: {settings.AI_BASE_URL}")
+                self.client = OpenAI(
+                    api_key=self.api_key,
+                    base_url=settings.AI_BASE_URL
+                )
             else:
                 # Standard OpenAI configuration
+                logger.info("Configuring standard OpenAI client")
                 self.client = OpenAI(api_key=self.api_key)
-                self.default_model = settings.OPENAI_MODEL or "gpt-oss-20b"
             
+            # Model configuration from settings
+            if not settings.OPENAI_MODEL:
+                logger.error("OPENAI_MODEL not configured in .env file")
+                raise ValueError("OPENAI_MODEL must be set in .env file")
+            
+            self.default_model = settings.OPENAI_MODEL
             self.enabled = True
             self.default_temperature = settings.OPENAI_TEMPERATURE or 0.1  # Lower temp for structured data
             self.default_max_tokens = settings.OPENAI_MAX_TOKENS or 5000
             self._rate_limiter = RateLimiter(max_calls=50, period=60)
             
-            logger.info(f"OpenAI client initialized for PDF processing with model: {self.default_model}")
+            logger.info(f"AI client initialized with provider: {self.provider}, model: {self.default_model}")
             
         except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {e}")
+            logger.error(f"Failed to initialize AI client: {e}")
             self.client = None
             self.enabled = False
     
@@ -127,14 +149,10 @@ class OpenAIClient:
                 if not self.client:
                     raise AIError("OpenAI client not initialized")
                 
-                # Add provider preferences for OpenRouter
+                # Add provider-specific configuration
                 extra_params = {}
-                if self.api_key and self.api_key.startswith('sk-or-'):
-                    extra_params['extra_body'] = {
-                        "provider": {
-                            "only": ["Groq"]
-                        }
-                    }
+                if self.provider_config:
+                    extra_params['extra_body'] = self.provider_config
                 
                 response = self.client.chat.completions.create(
                     model=model,

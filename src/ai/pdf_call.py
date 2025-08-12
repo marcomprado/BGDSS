@@ -344,8 +344,9 @@ DADOS A EXTRAIR:
 
 1. NÚMERO DA RESOLUÇÃO
 • Formato esperado: "xxxxx/20XX"
-• Localização: Geralmente no cabeçalho ou início do documento
+• Localização: Sempre no cabeçalho ou início do documento. 
 • Exemplo: "12345/2023"
+• Retornar: O número da resolução (mesmo formato xxxxx/20XX) ou "NÃO É RESOLUÇÃO"
 
 2. RELACIONADA
 • Descrição: Verificar se a resolução cita, modifica, altera ou revoga outra resolução

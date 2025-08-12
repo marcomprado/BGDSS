@@ -41,7 +41,16 @@ class Settings:
     
     def _initialize_settings(self) -> None:
         """Initialize all settings with defaults."""
+        # AI Provider Configuration
         self.OPENAI_API_KEY: Optional[str] = os.getenv('OPENAI_API_KEY')
+        self.AI_PROVIDER: str = os.getenv('AI_PROVIDER', 'openai')  # openai, openrouter
+        self.AI_BASE_URL: Optional[str] = os.getenv('AI_BASE_URL')  # Custom base URL for AI provider
+        self.AI_PROVIDER_CONFIG: Optional[str] = os.getenv('AI_PROVIDER_CONFIG')  # JSON string with provider-specific config
+        
+        # AI Model Configuration (no defaults - must be set in .env)
+        self.OPENAI_MODEL: Optional[str] = os.getenv('OPENAI_MODEL')
+        self.OPENAI_MAX_TOKENS: int = int(os.getenv('OPENAI_MAX_TOKENS', '25000'))
+        self.OPENAI_TEMPERATURE: float = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
         
         self.WEBDRIVER_PATH: str = os.getenv('WEBDRIVER_PATH', 'auto')
         
@@ -60,10 +69,6 @@ class Settings:
         self.DEFAULT_WAIT_TIME: int = int(os.getenv('DEFAULT_WAIT_TIME', '10'))
         self.MAX_RETRIES: int = int(os.getenv('MAX_RETRIES', '3'))
         self.RETRY_DELAY: int = int(os.getenv('RETRY_DELAY', '5'))
-        
-        self.OPENAI_MODEL: str = os.getenv('OPENAI_MODEL', 'gpt-4-turbo-preview')
-        self.OPENAI_MAX_TOKENS: int = int(os.getenv('OPENAI_MAX_TOKENS', '250000'))
-        self.OPENAI_TEMPERATURE: float = float(os.getenv('OPENAI_TEMPERATURE', '0.7'))
         
         self.CHROME_OPTIONS: list = [
             '--no-sandbox',

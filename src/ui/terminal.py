@@ -96,10 +96,7 @@ class BrazilianSitesTerminal:
         if site_num == 1:
             self.portal_saude_ui.execute_complete_flow()
         elif site_num == 2:
-            result = self.mds_parcelas_ui.show_config_screen()
-            if result:
-                print("MDS Parcelas functionality coming soon...")
-                input("Press Enter to continue...")
+            self.mds_parcelas_ui.execute_complete_flow()
         elif site_num == 3:
             result = self.mds_saldo_ui.show_config_screen()
             if result:

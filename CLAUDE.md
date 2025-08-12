@@ -25,9 +25,9 @@ Currently no active test files in the repository (test files have been removed f
 - Verify PDF processing with AI by checking `downloads/processed/` output
 
 ### Environment Setup
-- Copy `.env.example` to `.env` (if available) 
+- Create `.env` file in project root (no example file exists)
 - Set `OPENAI_API_KEY` for AI features (optional - system works without it)
-- Configure timeout and retry settings via environment variables
+- Configure timeout and retry settings via environment variables (see `config/settings.py` for all available options)
 
 ## Architecture Overview
 
@@ -55,9 +55,9 @@ Each scraper in `src/modules/sites/` follows this pattern:
 - Returns standardized result dictionary with success/failure status
 
 **Supported Government Sites**:
-1. **Portal Saude MG** (`portal_saude_mg.py`) - PDF downloads from health department
-2. **MDS Parcelas Pagas** (`mds_parcelas.py`) - Municipal payment data 
-3. **MDS Saldo Detalhado** (`mds_saldo.py`) - Detailed account balance data
+1. **Portal Saude MG** (`portal_saude_mg.py`) - Health resolutions PDFs (fully implemented)
+2. **MDS Parcelas Pagas** (`mds_parcelas.py`) - Municipal payment data (UI only)
+3. **MDS Saldo Detalhado** (`mds_saldo.py`) - Detailed account balance data (UI only)
 
 ### Directory Structure and Data Flow
 
@@ -95,13 +95,14 @@ downloads/
 - **MDS Sites**: Require developing (currently does not exist)
 - All scrapers respect rate limiting and robots.txt guidelines
 
-### Current File Status (Per Git)
-- Deleted files: `test_all_scrapers.py`, `update_pdf_compatibility.py`, `.DS_Store`, `dotenv.txt`, `src/ai/navigator_agent.py`
-- New files: `src/modules/pdf_processor.py` (untracked)
-- Modified files: Core scrapers, configuration, UI components
+### Implementation Status
+- **Portal Saude MG**: Fully implemented with PDF processing and Excel export
+- **MDS Sites**: UI components exist but scraping logic requires implementation
+- **PDF Processing**: Complete AI-powered extraction pipeline implemented
+- **Testing**: Manual testing through terminal interface (no automated test suite)
 
 ### PDF Processing
-- **PDF to Excel Conversion**: Core feature using `src/modules/pdf_processor.py` (recently added)
+- **PDF to Excel Conversion**: Core feature using `src/modules/pdf_data_to_table.py`
 - **AI-Powered Data Extraction**: Uses OpenAI API via `src/ai/pdf_call.py` and `src/ai/openai_client.py`
 - **Intelligent Filename Parsing**: Resolution numbers extracted from document titles  
 - **Excel Output**: Generated via `src/modules/pdf_data_to_table.py`
@@ -109,7 +110,7 @@ downloads/
 
 ### AI Integration (Required for PDF Processing)
 - **OpenAI API**: Essential for PDF data extraction to Excel format
-- **Models Used**: GPT-4o-mini for cost-efficient text extraction
+- **Models Used**: gpt-4-turbo-preview by default (configurable via `OPENAI_MODEL` env var)
 - **PDF Analysis**: Converts unstructured PDF content to structured Excel data
 - **Graceful Degradation**: System works for basic scraping without AI, but PDF processing requires OpenAI API key
 

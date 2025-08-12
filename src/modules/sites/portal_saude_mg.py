@@ -33,7 +33,7 @@ class PortalSaudeMGScraper:
     """
     
     def __init__(self):
-        self.base_url = "https://portal-antigo.saude.mg.gov.br/deliberacoes/documents?by_year=0&by_month=&by_format=pdf&category_id=4795&ordering=newest&q=reso"
+        self.base_url = "https://portal-antigo.saude.mg.gov.br/deliberacoes/documents?by_year=0&by_month=&by_format=pdf&category_id=4795&ordering=newest"
         self.download_base_path = Path("downloads/raw/portal_saude_mg")
         self.driver = None
         self.wait_timeout_implicit = 10  # 10 seconds implicit timeout
