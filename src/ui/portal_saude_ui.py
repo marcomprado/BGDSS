@@ -476,7 +476,7 @@ class PortalSaudeUI:
             processor = PDFProcessor()  # Vai falhar se API key não configurada
             
             # Tentar importar PDFTableGenerator  
-            from src.modules.pdf_data_to_table import PDFTableGenerator
+            from src.utils.pdf_data_to_table import PDFTableGenerator
             generator = PDFTableGenerator()
             
             logger.info("Dependências AI verificadas com sucesso")
