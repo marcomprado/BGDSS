@@ -52,15 +52,16 @@ class MunicipalityCorrector:
 Estado: {state_uf}
 Nome: "{input_name}"
 
-Regras:
-1. Se o nome existir no estado mas tiver erro de digitação, retorne o nome correto
-2. Se não existir no estado, retorne: erro4040
-3. Responda APENAS com o nome correto OU "erro4040"
+IMPORTANTE: Responda APENAS com o nome correto do município OU "erro4040". NÃO use markdown, links ou formatação.
 
-Exemplos MG:
-- "brumadhin" → "Brumadinho"
-- "belo horisonte" → "Belo Horizonte"  
-- "xpto123" → "erro4040"
+Regras:
+1. Se o nome existir no estado mas tiver erro de digitação, retorne apenas o nome correto
+2. Se não existir no estado, retorne apenas: erro4040
+
+Exemplos de resposta:
+- Belo Horizonte
+- Brumadinho  
+- erro4040
 
 Resposta:"""
                 }
@@ -90,8 +91,27 @@ Resposta:"""
                 logger.error(f"Empty content in AI response. Finish reason: {response.get('finish_reason')}")
                 return input_name
             
-            # Clean and validate response
-            result = content.strip().strip('"').strip("'")
+            # Clean and validate response - remove markdown, links, and extra formatting
+            result = content.strip()
+            
+            # Remove markdown headers (##, ###, etc)
+            if result.startswith('#'):
+                lines = result.split('\n')
+                for line in lines:
+                    clean_line = line.strip()
+                    if clean_line and not clean_line.startswith('#') and not clean_line.startswith('[') and not clean_line.startswith('http'):
+                        result = clean_line
+                        break
+            
+            # Remove markdown links [text](url)
+            import re
+            result = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', result)
+            
+            # Remove any remaining markdown formatting
+            result = re.sub(r'[#*_`]', '', result)
+            
+            # Clean quotes and extra whitespace
+            result = result.strip().strip('"').strip("'").strip()
             
             logger.info(f"AI response content: '{result}'")
             
