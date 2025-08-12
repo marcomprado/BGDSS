@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.utils.logger import logger, set_context
+from src.ai.municipality_corrector import get_municipality_corrector
 
 
 class MDSParcelasUI:
@@ -183,6 +184,7 @@ class MDSParcelasUI:
         year_config = None
         uf = None
         municipality = None
+        self._temp_year_config = None  # Store year config for municipality input
         
         while True:
             self.terminal.clear_screen()
@@ -201,6 +203,7 @@ class MDSParcelasUI:
                 year_config = self.get_year_input("1. Ano (obrigatório, >= 2006):")
                 if year_config is None:  # invalid input or ESC
                     return None  # Return to main menu
+                self._temp_year_config = year_config  # Store for municipality input
                 continue  # Refresh screen with new filter
             
             # Step 2: Get UF if not set
@@ -401,28 +404,50 @@ class MDSParcelasUI:
         return uf
     
     def get_municipality_input(self, prompt: str, uf: str) -> Optional[str]:
-        """Get municipality input."""
-        print(prompt)
-        print(f"   Digite o nome do município desejado no estado {uf}:")
-        print("   Ou digite 'TODOS' para selecionar todos os municípios do estado")
-        print("")
-        
-        municipality_str = self._get_key_input("   Município: ")
-        
-        if municipality_str == self.ESC_PRESSED:
-            return None  # Signal to go back
-        
-        municipality = municipality_str.strip()
-        
-        if not municipality:
-            self.terminal.show_error("Nome do município não pode ser vazio.")
-            return None
-        
-        # Special case for "all municipalities"
-        if municipality.upper() in ['TODOS', 'ALL', 'TODAS']:
-            return f"ALL_{uf}"
-        
-        return municipality
+        """Get municipality input with AI auto-correction."""
+        while True:  # Loop until valid input or ESC
+            print(prompt)
+            print(f"   Digite o nome do município desejado no estado {uf}:")
+            print("   Ou digite 'TODOS' para selecionar todos os municípios do estado")
+            print("")
+            
+            municipality_str = self._get_key_input("   Município: ")
+            
+            if municipality_str == self.ESC_PRESSED:
+                return None  # Signal to go back
+            
+            municipality = municipality_str.strip()
+            
+            if not municipality:
+                self.terminal.show_error("Nome do município não pode ser vazio.")
+                continue  # Ask again
+            
+            # Special case for "all municipalities"
+            if municipality.upper() in ['TODOS', 'ALL', 'TODAS']:
+                return f"ALL_{uf}"
+            
+            # Use AI to correct municipality name
+            try:
+                corrector = get_municipality_corrector()
+                corrected_name = corrector.correct_municipality_name(municipality, uf)
+                
+                if corrected_name == "erro4040":
+                    self.terminal.show_error(f"Município '{municipality}' não existe no estado {uf}. Por favor, digite novamente.")
+                    input("Pressione Enter para continuar...")
+                    # Don't clear screen here, just continue the loop
+                    print("")
+                    continue  # Ask again
+                
+                # If correction was made, use the corrected name silently
+                if corrected_name != municipality:
+                    logger.info(f"Municipality name auto-corrected: '{municipality}' -> '{corrected_name}'")
+                
+                return corrected_name
+                
+            except Exception as e:
+                logger.warning(f"Could not verify municipality name: {str(e)}")
+                # On error, return the original input to not block the user
+                return municipality
     
     def execute_complete_flow(self):
         """Execute complete MDS Parcelas flow: config -> processing -> results."""
