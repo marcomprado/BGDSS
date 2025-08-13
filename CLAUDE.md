@@ -26,8 +26,9 @@ Currently no active test files in the repository (test files have been removed f
 
 ### Environment Setup
 - Create `.env` file in project root (no example file exists)
-- Set `OPENAI_API_KEY` for AI features (optional - system works without it)
-- Configure timeout and retry settings via environment variables (see `config/settings.py` for all available options)
+- **Required for AI features**: `OPENAI_API_KEY` and `OPENAI_MODEL` (no defaults)
+- **AI Provider Options**: `AI_PROVIDER` (openai/openrouter), `AI_BASE_URL`, `AI_PROVIDER_CONFIG`
+- **Optional Settings**: Timeout, retry, and performance settings (see `config/settings.py` for all options)
 
 ## Architecture Overview
 
@@ -43,16 +44,16 @@ This is a **modular scraping system** with site-specific scrapers that inherit c
 
 **Main Application Flow**:
 1. `main.py` → `src.ui.terminal.run_brazilian_sites_terminal()`
-2. Terminal shows menu for 3 supported sites
-3. User configures filters (year, month, municipality)
-4. Appropriate scraper module is imported and executed
-5. Results are processed and saved to organized directory structure
+2. `BrazilianSitesTerminal` displays menu for 3 supported sites
+3. User selection delegates to specific UI classes (`portal_saude_ui.py`, `mds_parcelas_ui.py`, `mds_saldo_ui.py`)
+4. UI classes handle user configuration and execute appropriate scrapers
+5. Results processed through AI pipeline and saved to organized directory structure
 
-**Site Scraper Pattern**:
-Each scraper in `src/modules/sites/` follows this pattern:
-- `execute_scraping(config)` - Main entry point
-- Site-specific HTTP requests and parsing logic
-- Returns standardized result dictionary with success/failure status
+**Site Scraper Architecture**:
+- **UI Layer**: Site-specific UI classes handle user interaction and configuration
+- **Scraper Layer**: Site modules in `src/modules/sites/` implement `execute_scraping(ano, mes)` method
+- **Processing Layer**: AI-powered PDF analysis and Excel generation via `src/ai/` and `src/utils/`
+- **Configuration**: Centralized settings via singleton pattern in `config/settings.py`
 
 **Supported Government Sites**:
 1. **Portal Saude MG** (`portal_saude_mg.py`) - Health resolutions PDFs (fully implemented)
@@ -101,18 +102,21 @@ downloads/
 - **PDF Processing**: Complete AI-powered extraction pipeline implemented
 - **Testing**: Manual testing through terminal interface (no automated test suite)
 
-### PDF Processing
-- **PDF to Excel Conversion**: Core feature using `src/modules/pdf_data_to_table.py`
+### PDF Processing Pipeline
+- **PDF to Excel Conversion**: Core feature using `src/utils/pdf_data_to_table.py`
 - **AI-Powered Data Extraction**: Uses OpenAI API via `src/ai/pdf_call.py` and `src/ai/openai_client.py`
+- **Municipality Name Correction**: AI-powered correction via `src/ai/municipality_corrector.py`
 - **Intelligent Filename Parsing**: Resolution numbers extracted from document titles  
-- **Excel Output**: Generated via `src/modules/pdf_data_to_table.py`
+- **Excel Output**: Generated via `src/utils/pdf_data_to_table.py`
 - **Organized Storage**: Files structured by site/year/month in `downloads/` directory
 
 ### AI Integration (Required for PDF Processing)
-- **OpenAI API**: Essential for PDF data extraction to Excel format
-- **Models Used**: gpt-4-turbo-preview by default (configurable via `OPENAI_MODEL` env var)
-- **PDF Analysis**: Converts unstructured PDF content to structured Excel data
-- **Graceful Degradation**: System works for basic scraping without AI, but PDF processing requires OpenAI API key
+- **Multiple AI Providers**: Supports OpenAI and OpenRouter via `AI_PROVIDER` environment variable
+- **Flexible Configuration**: Base URLs and provider-specific configs via `AI_BASE_URL` and `AI_PROVIDER_CONFIG`
+- **Model Configuration**: Configurable via `OPENAI_MODEL` environment variable (no default - must be set)
+- **PDF Analysis**: Converts unstructured PDF content to structured Excel data with intelligent field extraction
+- **Municipality Correction**: AI-powered correction of municipality names in extracted data
+- **Graceful Degradation**: System works for basic scraping without AI, but PDF processing requires API key
 
 ### Memory and Performance
 - Uses streaming downloads for large files
