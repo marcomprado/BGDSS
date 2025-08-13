@@ -81,8 +81,27 @@ class PDFTableGenerator:
             # Initialize PDF processor
             processor = PDFProcessor(api_key=api_key)
             
-            # Process all PDFs in the directory
-            processing_results = processor.process_pdf_batch(pdf_directory)
+            # Process PDFs one at a time to avoid token limits
+            pdf_dir = Path(pdf_directory)
+            pdf_files = list(pdf_dir.glob("*.pdf"))
+            
+            # Try to load URL mapping if it exists
+            url_mapping = self._load_url_mapping(pdf_dir)
+            logger.info(f"Processing {len(pdf_files)} PDF files sequentially")
+            if url_mapping:
+                logger.info(f"URL mapping loaded with {len(url_mapping)} entries")
+            
+            processing_results = []
+            for i, pdf_file in enumerate(pdf_files):
+                logger.info(f"Processing file {i+1}/{len(pdf_files)}: {pdf_file.name}")
+                
+                # Get URL for this file if available
+                file_url = None
+                if url_mapping and pdf_file.name in url_mapping:
+                    file_url = url_mapping[pdf_file.name]['url']
+                
+                result = processor.process_single_pdf(str(pdf_file), file_link=file_url)
+                processing_results.append(result)
             
             if not processing_results:
                 return {
@@ -402,6 +421,55 @@ class PDFTableGenerator:
             validation_result['issues'].append(f"Validation error: {str(e)}")
             return validation_result
     
+    def _load_url_mapping(self, pdf_directory: Path) -> Optional[Dict[str, Dict[str, str]]]:
+        """
+        Load URL mapping from JSON file if it exists.
+        
+        Args:
+            pdf_directory: Path to directory containing PDFs
+            
+        Returns:
+            URL mapping dictionary or None if not found
+        """
+        try:
+            mapping_file = pdf_directory / 'url_mapping.json'
+            if not mapping_file.exists():
+                logger.debug(f"URL mapping file not found: {mapping_file}")
+                return None
+            
+            import json
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                url_mapping = json.load(f)
+            
+            # Validate that the loaded data is properly structured
+            if not isinstance(url_mapping, dict):
+                logger.warning(f"Invalid URL mapping format: expected dict, got {type(url_mapping)}")
+                return None
+                
+            # Validate structure of first entry if available
+            if url_mapping:
+                first_key = next(iter(url_mapping))
+                first_entry = url_mapping[first_key]
+                if not isinstance(first_entry, dict) or 'url' not in first_entry:
+                    logger.warning("Invalid URL mapping entry structure")
+                    return None
+            
+            logger.info(f"URL mapping loaded successfully from: {mapping_file} ({len(url_mapping)} entries)")
+            return url_mapping
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in URL mapping file: {e}")
+            return None
+        except PermissionError as e:
+            logger.error(f"Permission denied reading URL mapping file: {e}")
+            return None
+        except UnicodeDecodeError as e:
+            logger.error(f"Encoding error reading URL mapping file: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Unexpected error loading URL mapping: {e}")
+            return None
+
     def get_processing_summary(self, processing_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Generate a processing summary from results.

@@ -534,8 +534,26 @@ class PortalSaudeUI:
             # Atualizar tela de progresso
             self.update_processing_screen("Processando PDFs com IA...")
             
-            # Processar todos os PDFs
-            processing_results = processor.process_pdf_batch(pdf_directory)
+            # Processar PDFs um por vez para evitar limite de tokens
+            from pathlib import Path
+            pdf_dir = Path(pdf_directory)
+            pdf_files = list(pdf_dir.glob("*.pdf"))
+            
+            # Carregar URL mapping se existir
+            url_mapping = self._load_url_mapping_from_dir(pdf_dir)
+            logger.info(f"Processando {len(pdf_files)} PDFs sequencialmente")
+            
+            processing_results = []
+            for i, pdf_file in enumerate(pdf_files):
+                logger.info(f"Processando arquivo {i+1}/{len(pdf_files)}: {pdf_file.name}")
+                
+                # Obter URL para este arquivo se disponível
+                file_url = None
+                if url_mapping and pdf_file.name in url_mapping:
+                    file_url = url_mapping[pdf_file.name]['url']
+                
+                result = processor.process_single_pdf(str(pdf_file), file_link=file_url)
+                processing_results.append(result)
             
             if not processing_results:
                 error_msg = "Nenhum resultado do processamento AI"
@@ -621,6 +639,23 @@ class PortalSaudeUI:
         # Mostrar tela de erro específica para AI
         self.show_ai_error_screen(result_with_error, config)
         return result_with_error
+
+    def _load_url_mapping_from_dir(self, pdf_directory) -> Optional[Dict[str, Dict[str, str]]]:
+        """Carregar URL mapping do diretório de PDFs."""
+        try:
+            mapping_file = pdf_directory / 'url_mapping.json'
+            if not mapping_file.exists():
+                return None
+            
+            import json
+            with open(mapping_file, 'r', encoding='utf-8') as f:
+                url_mapping = json.load(f)
+            
+            if isinstance(url_mapping, dict):
+                return url_mapping
+            return None
+        except Exception:
+            return None
 
     def update_processing_screen(self, status_message: str):
         """Atualizar tela de processamento com novo status."""

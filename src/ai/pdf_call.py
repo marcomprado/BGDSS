@@ -128,11 +128,11 @@ class PDFProcessor:
     
     def process_pdf_batch(self, pdf_directory: str, batch_size: int = 10) -> List[Dict[str, Any]]:
         """
-        Process PDF files in batches to manage memory efficiently.
+        Process PDF files sequentially (no batching to avoid token limits).
         
         Args:
             pdf_directory: Path to directory containing PDF files
-            batch_size: Number of PDFs to process in each batch (default: 10)
+            batch_size: Deprecated parameter, kept for compatibility
             
         Returns:
             List of processing results for each PDF
@@ -153,55 +153,30 @@ class PDFProcessor:
         # Try to load URL mapping if it exists
         url_mapping = self._load_url_mapping(pdf_dir)
         
-        logger.info(f"Processing {len(pdf_files)} PDF files from {pdf_directory} in batches of {batch_size}")
+        logger.info(f"Processing {len(pdf_files)} PDF files sequentially")
         if url_mapping:
             logger.info(f"URL mapping loaded with {len(url_mapping)} entries")
         
         results = []
         successful_count = 0
         
-        # Process in batches to manage memory
-        for batch_start in range(0, len(pdf_files), batch_size):
-            batch_end = min(batch_start + batch_size, len(pdf_files))
-            batch_files = pdf_files[batch_start:batch_end]
-            batch_num = (batch_start // batch_size) + 1
-            total_batches = (len(pdf_files) + batch_size - 1) // batch_size
+        # Process each PDF individually to avoid token limits
+        for i, pdf_file in enumerate(pdf_files):
+            logger.info(f"Processing file {i+1}/{len(pdf_files)}: {pdf_file.name}")
             
-            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch_files)} files)")
+            # Get URL for this file if available
+            file_url = None
+            if url_mapping and pdf_file.name in url_mapping:
+                file_url = url_mapping[pdf_file.name]['url']
+                logger.debug(f"Found URL for {pdf_file.name}: {file_url}")
             
-            batch_results = []
-            for i, pdf_file in enumerate(batch_files):
-                global_index = batch_start + i + 1
-                logger.info(f"Processing file {global_index}/{len(pdf_files)}: {pdf_file.name}")
-                
-                # Get URL for this file if available
-                file_url = None
-                if url_mapping and pdf_file.name in url_mapping:
-                    file_url = url_mapping[pdf_file.name]['url']
-                    logger.debug(f"Found URL for {pdf_file.name}: {file_url}")
-                
-                result = self.process_single_pdf(str(pdf_file), file_link=file_url)
-                batch_results.append(result)
-                
-                if result.get('success', False):
-                    successful_count += 1
-                
-                # Clean up large text data from memory after processing
-                if 'extracted_data' in result and len(str(result)) > 10000:
-                    # Keep essential data, clear potentially large fields
-                    if 'raw_text' in result:
-                        del result['raw_text']
+            result = self.process_single_pdf(str(pdf_file), file_link=file_url)
+            results.append(result)
             
-            results.extend(batch_results)
-            
-            # Log batch completion and memory status
-            logger.info(f"Batch {batch_num} complete. Success rate: {len([r for r in batch_results if r.get('success', False)])}/{len(batch_results)}")
-            
-            # Optional: Save intermediate results periodically
-            if len(results) % 50 == 0:
-                self._save_intermediate_results(results, pdf_dir)
+            if result.get('success', False):
+                successful_count += 1
         
-        logger.info(f"Batch processing complete: {successful_count}/{len(pdf_files)} files processed successfully")
+        logger.info(f"Sequential processing complete: {successful_count}/{len(pdf_files)} files processed successfully")
         
         return results
     
@@ -275,15 +250,29 @@ Proceda com a análise e retorne os dados no formato JSON especificado."""
             # Create messages for API call
             messages = self.ai_client.create_prompt(system_prompt, user_content)
             
-            # Call OpenAI API with JSON response format
+            # Call OpenAI API (JSON format requested in prompt)
             response = self.ai_client.chat_completion(
                 messages,
-                temperature=0.1,  # Low temperature for consistent extraction
-                response_format={"type": "json_object"}
+                temperature=0.1  # Low temperature for consistent extraction
+                # Note: response_format not supported by this model
             )
             
-            # Parse the JSON response
-            extracted_data = json.loads(response['content'])
+            # Parse the JSON response (extract from markdown if needed)
+            content = response['content'].strip()
+            
+            # Handle markdown-wrapped JSON response
+            if content.startswith('```json'):
+                # Extract JSON from markdown code block
+                start_idx = content.find('{')
+                end_idx = content.rfind('}') + 1
+                if start_idx != -1 and end_idx != -1:
+                    json_content = content[start_idx:end_idx]
+                else:
+                    json_content = content
+            else:
+                json_content = content
+            
+            extracted_data = json.loads(json_content)
             
             # Add API usage info
             extracted_data['_ai_metadata'] = {
@@ -331,7 +320,7 @@ Proceda com a análise e retorne os dados no formato JSON especificado."""
         Returns:
             System prompt for AI extraction
         """
-        return """Você é um assistente especializado em análise de documentos legais. Sua tarefa é extrair informações específicas de um PDF de resolução e retornar os dados em formato estruturado para composição de uma tabela.
+        return """Você é um assistente especializado em análise de documentos legais. Sua tarefa é extrair informações específicas de um PDF e retornar os dados em formato estruturado para composição de uma tabela.
 
 INSTRUÇÕES GERAIS:
 • Analise cuidadosamente todo o conteúdo do PDF fornecido
@@ -344,18 +333,18 @@ DADOS A EXTRAIR:
 
 1. NÚMERO DA RESOLUÇÃO
 • Formato esperado: "xxxxx/20XX"
-• Localização: Sempre no cabeçalho ou início do documento. 
+• Localização: Sempre no cabeçalho, início do documento ou no titulo.
 • Exemplo: "12345/2023"
-• Retornar: O número da resolução (mesmo formato xxxxx/20XX) ou "NÃO É RESOLUÇÃO"
+• Retornar: O número da resolução (no formato xxxxx/20XX).
 
 2. RELACIONADA
 • Descrição: Verificar se a resolução cita, modifica, altera ou revoga outra resolução
 • Retornar: O número da resolução relacionada (mesmo formato xxxxx/20XX) ou "NÃO INFORMADO"
-• Palavras-chave: "modifica", "altera", "revoga", "em substituição", "complementa"
+• Palavras-chave: "Altera a Resolução", "modifica", "altera", "revoga", "em substituição", "complementa"
 
 3. OBJETO
 • Descrição: Extrair integralmente o primeiro parágrafo da resolução
-• Características: Geralmente começa após o número e data, descreve o propósito da resolução
+• Características: Geralmente começa após o número e data, descreve o propósito da resolução.
 • Retornar: Texto completo do primeiro parágrafo, sem alterações
 
 4. DATA INICIAL
@@ -382,8 +371,19 @@ DADOS A EXTRAIR:
 • Atenção especial: Procurar pelos códigos 301, 302, 303, 304, 305, 306, 122, 242 dentro da dotação
 • Retornar: Toda a sequência numérica da dotação orçamentária completa
 
+NOTA IMPORTANTE: Os campos "link" e "abreviacao" são adicionados automaticamente pelo sistema após a extração.
+
+OBSERVAÇÕES IMPORTANTES:
+• Mantenha fidelidade absoluta ao texto original
+• Não interprete ou parafraseie as informações
+• Em caso de dúvida sobre localização de dados, busque por padrões similares
+• Datas devem estar sempre no formato DD/MM/AAAA
+• Para campos não encontrados, use exatamente "NÃO INFORMADO"
+
+Proceda com a análise do PDF fornecido e retorne os dados no formato especificado.
+
 FORMATO DE RESPOSTA:
-Retorne os dados extraídos no seguinte formato JSON:
+Retorne os dados extraídos no seguinte formato JSON (Se Mantenha extremamente fiel a esse formato.) :
 {
   "numero_resolucao": "",
   "relacionada": "",
@@ -394,16 +394,7 @@ Retorne os dados extraídos no seguinte formato JSON:
   "dotacao_orcamentaria": ""
 }
 
-NOTA IMPORTANTE: Os campos "link" e "abreviacao" são adicionados automaticamente pelo sistema após a extração.
-
-OBSERVAÇÕES IMPORTANTES:
-• Mantenha fidelidade absoluta ao texto original
-• Não interprete ou parafraseie as informações
-• Em caso de dúvida sobre localização de dados, busque por padrões similares
-• Datas devem estar sempre no formato DD/MM/AAAA
-• Para campos não encontrados, use exatamente "NÃO INFORMADO"
-
-Proceda com a análise do PDF fornecido e retorne os dados no formato especificado."""
+"""
     
     def get_processing_stats(self) -> Dict[str, Any]:
         """
@@ -449,7 +440,7 @@ Proceda com a análise do PDF fornecido e retorne os dados no formato especifica
         # Validate number format (xxxxx/20XX)
         if 'numero_resolucao' in extracted_data:
             numero = extracted_data['numero_resolucao']
-            if numero != "NÃO INFORMADO" and not self._validate_resolution_number_format(numero):
+            if numero != "" and not self._validate_resolution_number_format(numero):
                 validation_result['warnings'].append(f"Resolution number format may be incorrect: {numero}")
         
         # Validate date formats (DD/MM/AAAA)

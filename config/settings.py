@@ -46,6 +46,7 @@ class Settings:
         self.AI_PROVIDER: str = os.getenv('AI_PROVIDER', 'openai')  # openai, openrouter
         self.AI_BASE_URL: Optional[str] = os.getenv('AI_BASE_URL')  # Custom base URL for AI provider
         self.AI_PROVIDER_CONFIG: Optional[str] = os.getenv('AI_PROVIDER_CONFIG')  # JSON string with provider-specific config
+        self.AI_PROVIDER_PREFERENCE: str = os.getenv('AI_PROVIDER_PREFERENCE', '')  # Specific provider preference for OpenRouter
         
         # AI Model Configuration (no defaults - must be set in .env)
         self.OPENAI_MODEL: Optional[str] = os.getenv('OPENAI_MODEL')

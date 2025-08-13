@@ -40,6 +40,21 @@ class RateLimiter:
         return wrapper
 
 
+def _extract_json_from_response(content: str) -> str:
+    """Extract JSON from AI response, handling markdown code blocks."""
+    content = content.strip()
+    
+    # Handle markdown-wrapped JSON response
+    if content.startswith('```json'):
+        # Extract JSON from markdown code block
+        start_idx = content.find('{')
+        end_idx = content.rfind('}') + 1
+        if start_idx != -1 and end_idx != -1:
+            return content[start_idx:end_idx]
+    
+    return content
+
+
 class OpenAIClient:
     """OpenAI client optimized for PDF processing and text analysis."""
     
@@ -152,7 +167,19 @@ class OpenAIClient:
                 # Add provider-specific configuration
                 extra_params = {}
                 if self.provider_config:
+                    # Use custom provider config from JSON
                     extra_params['extra_body'] = self.provider_config
+                elif self.provider == 'openrouter':
+                    # Check if user specified a provider preference
+                    provider_pref = settings.AI_PROVIDER_PREFERENCE.strip()
+                    if provider_pref:
+                        # User specified a specific provider
+                        extra_params['extra_body'] = {
+                            "provider": {
+                                "only": [provider_pref]
+                            }
+                        }
+                    # Else: Let OpenRouter choose automatically (no extra_body)
                 
                 response = self.client.chat.completions.create(
                     model=model,
@@ -257,13 +284,14 @@ class OpenAIClient:
         messages = self.create_prompt(system_prompt, user_content)
         
         response = self.chat_completion(
-            messages,
-            response_format={"type": "json_object"}
+            messages
+            # Note: response_format not supported by model
         )
         
         try:
             import json
-            return json.loads(response['content'])
+            json_content = _extract_json_from_response(response['content'])
+            return json.loads(json_content)
         except json.JSONDecodeError:
             logger.error("Failed to parse JSON response from AI")
             return {'error': 'Failed to parse response', 'raw_content': response['content']}
@@ -293,13 +321,14 @@ class OpenAIClient:
         messages = self.create_prompt(system_prompt, user_content)
         response = self.chat_completion(
             messages,
-            temperature=0.1,
-            response_format={"type": "json_object"}
+            temperature=0.1
+            # Note: response_format not supported by model
         )
         
         try:
             import json
-            return json.loads(response['content'])
+            json_content = _extract_json_from_response(response['content'])
+            return json.loads(json_content)
         except json.JSONDecodeError:
             logger.error("Failed to parse JSON response from AI")
             return {'error': 'Failed to parse response', 'raw_content': response['content']}
@@ -371,14 +400,15 @@ class OpenAIClient:
         messages = self.create_prompt(system_prompt, user_content)
         response = self.chat_completion(
             messages,
-            temperature=0.05,  # Very low temperature for accuracy
-            response_format={"type": "json_object"}
+            temperature=0.05  # Very low temperature for accuracy
+            # Note: response_format not supported by model
         )
         
         try:
             import json
             from datetime import datetime
-            result = json.loads(response['content'])
+            json_content = _extract_json_from_response(response['content'])
+            result = json.loads(json_content)
             result['data_extracao'] = datetime.now().isoformat()
             return result
         except json.JSONDecodeError:
@@ -413,13 +443,14 @@ class OpenAIClient:
         messages = self.create_prompt(system_prompt, user_content)
         response = self.chat_completion(
             messages, 
-            temperature=0.1,
-            response_format={"type": "json_object"}
+            temperature=0.1
+            # Note: response_format not supported by model
         )
         
         try:
             import json
-            validation_result = json.loads(response['content'])
+            json_content = _extract_json_from_response(response['content'])
+            validation_result = json.loads(json_content)
             validation_result['tokens_used'] = response['usage']['total_tokens']
             return validation_result
         except json.JSONDecodeError:
