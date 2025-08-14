@@ -11,11 +11,229 @@ import select
 import termios
 import tty
 import os
+import time
+import threading
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.utils.logger import logger, set_context
 from src.ai.municipality_corrector import get_municipality_corrector
+
+
+class InteractiveProgressDisplay:
+    """
+    Interactive progress display with real-time updates for MDS Parcelas.
+    Simplified version focused on essential progress tracking.
+    """
+    
+    def __init__(self, terminal_instance, config: Dict[str, Any]):
+        self.terminal = terminal_instance
+        self.config = config
+        self.start_time = datetime.now()
+        self.current_step = ""
+        self.current_detail = ""
+        self.steps_completed = []
+        
+        # Animation system
+        self.animation_frames = ["   ", ".  ", ".. ", "..."]
+        self.animation_index = 0
+        self.last_animation_update = time.time()
+        
+        # Threading control
+        self.running = False
+        self.update_thread = None
+        self.lock = threading.Lock()
+        
+        # Display state
+        self.last_timer_line = ""
+        self.timer_line_number = 7
+        self.steps_start_line = 10
+        self.first_render = False
+        
+    def start(self):
+        """Start the real-time update thread."""
+        if not self.running:
+            self.running = True
+            self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
+            self.update_thread.start()
+    
+    def stop(self):
+        """Stop the real-time update thread."""
+        self.running = False
+        if self.update_thread:
+            self.update_thread.join(timeout=1)
+    
+    def show_status(self, step: str, detail: str = "", completed_steps: List[str] = None):
+        """Show current processing status with real-time updates."""
+        with self.lock:
+            self.current_step = step
+            self.current_detail = detail
+            if completed_steps:
+                self.steps_completed = completed_steps
+        
+        # Full render only on step changes
+        self._full_render()
+    
+    def get_elapsed_time(self) -> float:
+        """Get elapsed time in minutes since start."""
+        elapsed = datetime.now() - self.start_time
+        return elapsed.total_seconds() / 60
+    
+    def _update_loop(self):
+        """Background thread for real-time updates."""
+        while self.running:
+            # Update timer every second
+            self._update_timer()
+            
+            # Update animation every 0.5 seconds
+            current_time = time.time()
+            if current_time - self.last_animation_update >= 0.5:
+                self._update_animation()
+                self.last_animation_update = current_time
+            
+            time.sleep(0.5)
+    
+    def _update_timer(self):
+        """Update only the timer line."""
+        if not self.first_render:
+            return
+            
+        with self.lock:
+            elapsed = datetime.now() - self.start_time
+            total_minutes = elapsed.total_seconds() / 60
+            new_timer_line = f"Tempo decorrido: {total_minutes:.1f} minutos"
+            
+            if new_timer_line != self.last_timer_line:
+                # Move cursor to timer line and update
+                print(f"\033[{self.timer_line_number};1H\033[K{new_timer_line}", end='', flush=True)
+                # Move cursor to bottom to avoid interference
+                print(f"\033[20;1H", end='', flush=True)
+                self.last_timer_line = new_timer_line
+    
+    def _update_animation(self):
+        """Update loading animations for active steps."""
+        with self.lock:
+            self.animation_index = (self.animation_index + 1) % len(self.animation_frames)
+            
+            # Update the current step line with animation
+            if self.current_step:
+                self._update_current_step_line()
+    
+    def _update_current_step_line(self):
+        """Update only the line with the current active step."""
+        if not self.first_render:
+            return
+            
+        all_steps = [
+            "Conectando ao site MDS",
+            "Fazendo autenticação",
+            "Aplicando filtros",
+            "Coletando dados",
+            "Processando informações",
+            "Salvando resultados",
+            "Finalizando"
+        ]
+        
+        if self.current_step in all_steps:
+            step_index = all_steps.index(self.current_step)
+            line_number = self.steps_start_line + step_index
+            
+            # Build the step line with animation
+            animation = self.animation_frames[self.animation_index]
+            step_line = f"⋯ {self.current_step}{animation}"
+            
+            # Add detail if available
+            if self.current_detail:
+                step_line += f" ({self.current_detail})"
+            
+            # Move cursor to step line and update
+            print(f"\033[{line_number};1H\033[K{step_line}", end='', flush=True)
+            # Move cursor to bottom to avoid interference
+            print(f"\033[20;1H", end='', flush=True)
+    
+    def _full_render(self):
+        """Render the complete interface."""
+        self.terminal.clear_screen()
+        print("========================================")
+        print("         EM PROCESSAMENTO")
+        print("========================================")
+        print("")
+        
+        # Show configuration summary
+        config_summary = self._format_config()
+        print(f"Configuração: {config_summary}")
+        print("")
+        
+        # Show elapsed time (will be updated by thread)
+        elapsed = datetime.now() - self.start_time
+        total_minutes = elapsed.total_seconds() / 60
+        self.last_timer_line = f"Tempo decorrido: {total_minutes:.1f} minutos"
+        print(self.last_timer_line)
+        print("")
+        
+        # Show process steps
+        print("Etapas do processo:")
+        
+        all_steps = [
+            "Conectando ao site MDS",
+            "Fazendo autenticação",
+            "Aplicando filtros",
+            "Coletando dados",
+            "Processando informações",
+            "Salvando resultados",
+            "Finalizando"
+        ]
+        
+        for step_name in all_steps:
+            if step_name in self.steps_completed:
+                print(f"✓ {step_name}")
+            elif step_name == self.current_step:
+                # Initial render with animation
+                animation = self.animation_frames[self.animation_index]
+                step_line = f"⋯ {step_name}{animation}"
+                if self.current_detail:
+                    step_line += f" ({self.current_detail})"
+                print(step_line)
+            else:
+                print(f"  {step_name}")
+        
+        print("")
+        print("Pressione Ctrl+C para cancelar")
+        
+        # Mark first render as complete and position cursor safely
+        self.first_render = True
+        print(f"\033[20;1H", end='', flush=True)
+    
+    def _format_config(self) -> str:
+        """Format configuration for display."""
+        parts = []
+        
+        # Handle year configuration
+        year_config = self.config.get('year_config', {})
+        if year_config.get('type') == 'single':
+            parts.append(f"Ano: {year_config['year']}")
+        elif year_config.get('type') == 'range':
+            parts.append(f"Anos: {year_config['start_year']}-{year_config['end_year']}")
+        elif year_config.get('type') == 'multiple':
+            years_str = ', '.join(map(str, year_config['years'][:3]))
+            if len(year_config['years']) > 3:
+                years_str += '...'
+            parts.append(f"Anos: {years_str}")
+        
+        # Handle UF
+        if 'uf' in self.config:
+            parts.append(f"UF: {self.config['uf']}")
+        
+        # Handle municipality
+        if 'municipality' in self.config:
+            municipality = self.config['municipality']
+            if municipality.startswith('ALL_'):
+                uf = municipality.split('_')[1]
+                parts.append(f"Município: Todos de {uf}")
+            else:
+                parts.append(f"Município: {municipality}")
+        
+        return " | ".join(parts) if parts else "Configuração padrão"
 
 
 class MDSParcelasUI:
@@ -457,30 +675,54 @@ class MDSParcelasUI:
             self.run_scraping_task(config)
     
     def run_scraping_task(self, config: Dict[str, Any]):
-        """Run the scraping task."""
-        self.show_processing_screen(config)
+        """Run the scraping task with interactive progress display."""
+        # Initialize interactive progress display
+        progress = InteractiveProgressDisplay(self.terminal, config)
         
         try:
             # Start logging session
             logger.start_session(f"{config['site']}_scraping")
             set_context(site=config['site'])
             
+            # Enable silent mode to prevent console pollution
+            logger.enable_silent_mode()
             logger.info(f"Iniciando scraping MDS Parcelas: {config}")
             
-            # Import and run the MDS Parcelas scraper
+            # Start interactive progress display
+            progress.start()
+            
+            # Show initial status
+            progress.show_status("Conectando ao site MDS", "Inicializando navegador")
+            
+            # Import and create scraper
             from src.modules.sites.mds_parcelas import MDSParcelasScraper
             scraper = MDSParcelasScraper()
-            result = scraper.execute_scraping(config)
+            
+            # Execute scraping with progress updates
+            result = self._execute_scraping_with_callbacks(scraper, config, progress)
             
             logger.info(f"Scraping finalizado: {result.get('success', False)}")
+            
+            # Capture real elapsed time before stopping progress display
+            actual_elapsed_minutes = progress.get_elapsed_time()
+            
+            # Stop progress display and show results
+            progress.stop()
+            logger.disable_silent_mode()
             logger.end_session()
             
             if result.get('success', False):
-                self.show_success_screen(result)
+                self.show_success_screen(result, actual_elapsed_minutes)
             else:
                 self.show_error_screen(result)
                 
         except Exception as e:
+            # Capture real elapsed time before stopping progress display
+            actual_elapsed_minutes = progress.get_elapsed_time()
+            
+            # Stop progress display on error
+            progress.stop()
+            logger.disable_silent_mode()
             logger.error(f"Erro fatal durante scraping: {str(e)}")
             logger.exception("Stack trace completo:")
             logger.end_session()
@@ -492,41 +734,62 @@ class MDSParcelasUI:
             }
             self.show_error_screen(error_result)
     
-    def show_processing_screen(self, config: Dict[str, Any]):
-        """Show processing screen with progress indicators."""
-        self.terminal.clear_screen()
-        print("========================================")
-        print("           EM PROCESSAMENTO")
-        print("========================================")
-        print("")
-        print(f"Site: {self.site_info['name']}")
-        print(f"Configuracao: {self.format_config_summary(config)}")
-        print("")
-        print("Status atual: Iniciando processo...")
-        print("")
+    def _execute_scraping_with_callbacks(self, scraper, config: Dict[str, Any], progress: InteractiveProgressDisplay) -> Dict[str, Any]:
+        """Execute scraping with progress callbacks."""
+        completed_steps = ["Conectando ao site MDS"]
         
-        # Show progress steps
-        steps = [
-            "Conectando ao site MDS",
-            "Fazendo login/autenticação", 
-            "Aplicando filtros",
-            "Coletando dados",
-            "Processando informações",
-            "Salvando resultados",
-            "Finalizando"
-        ]
+        # Authenticate
+        progress.show_status("Fazendo autenticação", "Login no sistema", completed_steps)
+        time.sleep(0.5)  # Simulate authentication time
+        completed_steps.append("Fazendo autenticação")
         
-        for step in steps:
-            print(f"[ ] {step}")
+        # Apply filters
+        progress.show_status("Aplicando filtros", "Configurando parâmetros", completed_steps)
         
-        print("")
-        print("Aguarde... O processo pode levar alguns minutos.")
-        print("• Autenticação: 30-60 segundos")
-        print("• Coleta de dados: 1-5 minutos (depende dos filtros)")
-        print("")
-        print("Pressione Ctrl+C para cancelar")
+        # Create callback function to update progress
+        def progress_callback(stage, detail):
+            if stage == "collecting_data":
+                completed_steps_copy = completed_steps + ["Aplicando filtros"]
+                progress.show_status("Coletando dados", detail, completed_steps_copy)
+            elif stage == "processing":
+                completed_steps_copy = completed_steps + ["Aplicando filtros", "Coletando dados"]
+                progress.show_status("Processando informações", detail, completed_steps_copy)
+            elif stage == "saving":
+                completed_steps_copy = completed_steps + ["Aplicando filtros", "Coletando dados", "Processando informações"]
+                progress.show_status("Salvando resultados", detail, completed_steps_copy)
+        
+        # Execute the actual scraping
+        try:
+            # Pass the callback if the scraper supports it
+            if hasattr(scraper, 'execute_scraping'):
+                # Try to pass callback if method signature supports it
+                import inspect
+                sig = inspect.signature(scraper.execute_scraping)
+                if 'progress_callback' in sig.parameters:
+                    result = scraper.execute_scraping(config, progress_callback=progress_callback)
+                else:
+                    result = scraper.execute_scraping(config)
+            else:
+                result = {'success': False, 'error': 'Scraper not implemented'}
+            
+            # Show final status
+            if result.get('success'):
+                completed_steps_final = ["Conectando ao site MDS", "Fazendo autenticação", "Aplicando filtros", 
+                                        "Coletando dados", "Processando informações", "Salvando resultados"]
+                progress.show_status("Finalizando", "Processo concluído", completed_steps_final)
+        
+        except Exception as e:
+            result = {'success': False, 'error': str(e)}
+        
+        return result
     
-    def show_success_screen(self, result: Dict[str, Any]):
+    def show_processing_screen(self, config: Dict[str, Any]):
+        """Show static processing screen (deprecated - using InteractiveProgressDisplay instead)."""
+        # This method is kept for compatibility but not actively used
+        # The InteractiveProgressDisplay handles all progress visualization
+        pass
+    
+    def show_success_screen(self, result: Dict[str, Any], actual_elapsed_minutes: float = None):
         """Show success screen with results."""
         self.terminal.clear_screen()
         print("========================================")
@@ -540,7 +803,11 @@ class MDSParcelasUI:
         print(f"- Filtros aplicados: {self.format_config_summary(self.current_config)}")
         print(f"- Registros coletados: {result.get('total_records', 0)}")
         print(f"- Tamanho total: {result.get('total_size_mb', 0):.1f} MB")
-        print(f"- Tempo decorrido: {result.get('duration_minutes', 0):.1f} minutos")
+        
+        # Use actual elapsed time from progress display if available, otherwise fallback to result time
+        elapsed_time = actual_elapsed_minutes if actual_elapsed_minutes is not None else result.get('duration_minutes', 0)
+        print(f"- Tempo decorrido: {elapsed_time:.1f} minutos")
+        
         print("")
         print(f"Arquivos salvos em: {result.get('download_path', 'downloads/raw/mds_parcelas/')}")
         print("")
