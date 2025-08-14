@@ -104,10 +104,7 @@ class BrazilianSitesTerminal:
         elif site_num == 2:
             self.mds_parcelas_ui.execute_complete_flow()
         elif site_num == 3:
-            result = self.mds_saldo_ui.show_config_screen()
-            if result:
-                print("MDS Saldo functionality coming soon...")
-                input("Press Enter to continue...")
+            self.mds_saldo_ui.execute_complete_flow()
 
 
     def clear_screen(self):

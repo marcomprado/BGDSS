@@ -925,6 +925,9 @@ class MDSSaldoUI:
             elif stage == "collecting_data":
                 completed_steps_copy = completed_steps + ["Aplicando filtros", "Consultando saldo"]
                 progress.show_status("Coletando dados", detail, completed_steps_copy)
+            elif stage == "no_data_available":
+                completed_steps_copy = completed_steps + ["Aplicando filtros", "Consultando saldo"]
+                progress.show_status("Verificando disponibilidade", detail, completed_steps_copy)
             elif stage == "processing":
                 completed_steps_copy = completed_steps + ["Aplicando filtros", "Consultando saldo", "Coletando dados"]
                 progress.show_status("Processando informações", detail, completed_steps_copy)
@@ -969,12 +972,38 @@ class MDSSaldoUI:
         print("Resumo da coleta:")
         print(f"- Site processado: {self.site_info['name']}")
         print(f"- Filtros aplicados: {self.format_config_summary(self.current_config)}")
-        print(f"- Registros coletados: {result.get('total_records', 0)}")
+        
+        # Enhanced statistics with data availability breakdown
+        files_count = len(result.get('files_downloaded', []))
+        total_records = result.get('total_records', 0)
+        no_data_count = result.get('total_no_data', 0)
+        errors_count = len(result.get('errors', []))
+        
+        print(f"- Arquivos baixados: {files_count}")
+        print(f"- Registros coletados: {total_records}")
+        
+        # Show data availability statistics
+        if no_data_count > 0:
+            total_queries = files_count + no_data_count + errors_count
+            print(f"- Consultas sem dados: {no_data_count}")
+            if total_queries > 0:
+                success_rate = ((files_count + no_data_count) / total_queries) * 100
+                print(f"- Taxa de consultas válidas: {success_rate:.1f}%")
+        
+        if errors_count > 0:
+            print(f"- Erros encontrados: {errors_count}")
+        
         print(f"- Tamanho total: {result.get('total_size_mb', 0):.1f} MB")
         
         # Use actual elapsed time from progress display if available, otherwise fallback to result time
         elapsed_time = actual_elapsed_minutes if actual_elapsed_minutes is not None else result.get('duration_minutes', 0)
         print(f"- Tempo decorrido: {elapsed_time:.1f} minutos")
+        
+        # Add helpful explanation about data availability
+        if no_data_count > 0:
+            print("")
+            print("ℹ️  Nota: Consultas 'sem dados' são normais e indicam períodos")
+            print("   onde o órgão não possuía informações disponíveis.")
         
         print("")
         print(f"Arquivos salvos em: {result.get('download_path', 'downloads/raw/mds_saldo/')}")

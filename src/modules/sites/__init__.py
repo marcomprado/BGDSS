@@ -8,11 +8,11 @@ This package contains specialized scrapers for Brazilian government sites:
 """
 
 from .portal_saude_mg import PortalSaudeMGScraper
-# from .mds_parcelas import MDSParcelasScraper  # Commented out - class not implemented yet
-# from .mds_saldo import MDSSaldoScraper  # Commented out - class not implemented yet
+from .mds_parcelas import MDSParcelasScraper
+from .mds_saldo import MDSSaldoScraper
 
 __all__ = [
     'PortalSaudeMGScraper',
-    #'MDSParcelasScraper', 
-    #'MDSSaldoScraper'
+    'MDSParcelasScraper', 
+    'MDSSaldoScraper'
 ]
