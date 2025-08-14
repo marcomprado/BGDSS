@@ -72,6 +72,8 @@ class Logger:
     def __init__(self):
         if self._logger is None:
             self._setup_logger()
+            self.silent_mode = False
+            self.original_console_level = logging.WARNING
     
     def _setup_logger(self) -> None:
         """Initialize the logger with console and file handlers."""
@@ -110,6 +112,9 @@ class Logger:
         self._logger.addHandler(console_handler)
         self._logger.addHandler(file_handler)
         self.session_id = None
+        
+        # Store console handler reference for silent mode control
+        self.console_handler = console_handler
     
     def set_level(self, level: str) -> None:
         """Set the logging level."""
@@ -126,6 +131,19 @@ class Logger:
             for handler in self._logger.handlers:
                 if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
                     handler.setLevel(level_mapping[level.upper()])
+    
+    def enable_silent_mode(self) -> None:
+        """Enable silent mode - no console output during processing."""
+        if hasattr(self, 'console_handler'):
+            self.original_console_level = self.console_handler.level
+            self.console_handler.setLevel(logging.CRITICAL)  # Only critical errors to console
+            self.silent_mode = True
+    
+    def disable_silent_mode(self) -> None:
+        """Disable silent mode - restore normal console output."""
+        if hasattr(self, 'console_handler'):
+            self.console_handler.setLevel(self.original_console_level)
+            self.silent_mode = False
     
     def debug(self, message: str, *args, **kwargs) -> None:
         """Log debug message."""

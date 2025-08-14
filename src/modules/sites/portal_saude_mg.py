@@ -41,13 +41,14 @@ class PortalSaudeMGScraper:
         self.session_start_time = None
         self.operation_times = {}  # Track timing for different operations
         
-    def execute_scraping(self, ano: str, mes: str = None) -> Dict[str, Any]:
+    def execute_scraping(self, ano: str, mes: str = None, progress_callback=None) -> Dict[str, Any]:
         """
         Execute scraping for Portal Saude MG.
         
         Args:
             ano: String with year (ex: "2024")
             mes: String with month ("01" to "12") or None for all months
+            progress_callback: Optional callback function to report progress
             
         Returns:
             Dict with success status, files downloaded, total files, and errors
@@ -90,6 +91,8 @@ class PortalSaudeMGScraper:
             # 4. Load all results (infinite scroll)
             operation_start = self._start_operation_timer("load_results")
             logger.info("Carregando todos os resultados com scroll infinito")
+            if progress_callback:
+                progress_callback("loading_results", "Expandindo lista de documentos")
             self._load_all_results()
             self._end_operation_timer("load_results", operation_start)
             
@@ -103,7 +106,9 @@ class PortalSaudeMGScraper:
             # 6. Download all PDFs
             if pdf_links:
                 operation_start = self._start_operation_timer("download_pdfs")
-                downloaded_files = self._download_all_pdfs(pdf_links, ano, mes)
+                if progress_callback:
+                    progress_callback("downloading_pdfs", f"Baixando {len(pdf_links)} PDFs")
+                downloaded_files = self._download_all_pdfs(pdf_links, ano, mes, progress_callback)
                 self._end_operation_timer("download_pdfs", operation_start)
             
             # 7. Calculate results
@@ -421,7 +426,7 @@ class PortalSaudeMGScraper:
             logger.error(error_msg)
             return []
     
-    def _download_all_pdfs(self, pdf_links: List[Dict[str, str]], ano: str, mes: str = None) -> List[Dict[str, str]]:
+    def _download_all_pdfs(self, pdf_links: List[Dict[str, str]], ano: str, mes: str = None, progress_callback=None) -> List[Dict[str, str]]:
         """Download all PDFs with sequential naming: [mes]-[ano]-RES-[numero_ordem_de_download]"""
         downloaded_files = []
         download_path = self._get_download_path(ano, mes)
@@ -431,6 +436,10 @@ class PortalSaudeMGScraper:
         for download_order, pdf_info in enumerate(pdf_links, 1):
             try:
                 logger.info(f"Baixando {download_order} de {len(pdf_links)} arquivos: {pdf_info['title'][:50]}...")
+                
+                # Update progress callback with current/total count
+                if progress_callback:
+                    progress_callback("downloading_pdfs", f"Baixando PDFs", download_order, len(pdf_links))
                 
                 # Create simple sequential filename
                 filename = self._create_simple_filename(download_order, ano, mes)

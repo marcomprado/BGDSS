@@ -8,10 +8,244 @@ de ano, mês e intervalos personalizados.
 
 import sys
 import os
-from typing import Dict, List, Optional, Any
+import time
+import threading
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
+from pathlib import Path
 
 from src.utils.logger import logger, set_context
+
+
+class InteractiveProgressDisplay:
+    """
+    Interactive progress display with real-time updates.
+    Features timer updates, loading animations, and progress counters.
+    """
+    
+    def __init__(self, terminal_instance, config: Dict[str, Any]):
+        self.terminal = terminal_instance
+        self.config = config
+        self.start_time = datetime.now()
+        self.current_step = ""
+        self.current_detail = ""
+        self.steps_completed = []
+        
+        # Animation system
+        self.animation_frames = ["   ", ".  ", ".. ", "..."]
+        self.animation_index = 0
+        self.last_animation_update = time.time()
+        
+        # Progress counters
+        self.pdf_current = 0
+        self.pdf_total = 0
+        
+        # Threading control
+        self.running = False
+        self.update_thread = None
+        self.lock = threading.Lock()
+        
+        # Display state
+        self.last_timer_line = ""
+        self.timer_line_number = 7   # Line where timer is displayed (was 6, now corrected)
+        self.steps_start_line = 10   # Line where steps start (was 9, now corrected) 
+        self.first_render = False    # Flag to prevent updates before first render
+        
+    def start(self):
+        """Start the real-time update thread."""
+        if not self.running:
+            self.running = True
+            self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
+            self.update_thread.start()
+    
+    def stop(self):
+        """Stop the real-time update thread."""
+        self.running = False
+        if self.update_thread:
+            self.update_thread.join(timeout=1)
+    
+    def show_status(self, step: str, detail: str = "", completed_steps: List[str] = None):
+        """Show current processing status with real-time updates."""
+        with self.lock:
+            self.current_step = step
+            self.current_detail = detail
+            if completed_steps:
+                self.steps_completed = completed_steps
+        
+        # Full render only on step changes
+        self._full_render()
+    
+    def set_pdf_progress(self, current: int, total: int):
+        """Update PDF download progress counter."""
+        with self.lock:
+            self.pdf_current = current
+            self.pdf_total = total
+    
+    def get_elapsed_time(self) -> float:
+        """Get elapsed time in minutes since start."""
+        elapsed = datetime.now() - self.start_time
+        return elapsed.total_seconds() / 60
+    
+    def _update_loop(self):
+        """Background thread for real-time updates."""
+        while self.running:
+            # Update timer every second
+            self._update_timer()
+            
+            # Update animation every 0.5 seconds
+            current_time = time.time()
+            if current_time - self.last_animation_update >= 0.5:
+                self._update_animation()
+                self.last_animation_update = current_time
+            
+            time.sleep(0.5)
+    
+    def _update_timer(self):
+        """Update only the timer line."""
+        if not self.first_render:
+            return  # Don't update before first render
+            
+        with self.lock:
+            elapsed = datetime.now() - self.start_time
+            total_minutes = elapsed.total_seconds() / 60
+            new_timer_line = f"Tempo decorrido: {total_minutes:.1f} minutos"
+            
+            if new_timer_line != self.last_timer_line:
+                # Move cursor to timer line and update
+                print(f"\033[{self.timer_line_number};1H\033[K{new_timer_line}", end='', flush=True)
+                # Move cursor to bottom to avoid interference
+                print(f"\033[20;1H", end='', flush=True)
+                self.last_timer_line = new_timer_line
+    
+    def _update_animation(self):
+        """Update loading animations for active steps."""
+        with self.lock:
+            self.animation_index = (self.animation_index + 1) % len(self.animation_frames)
+            
+            # Update the current step line with animation
+            if self.current_step:
+                self._update_current_step_line()
+    
+    def _update_current_step_line(self):
+        """Update only the line with the current active step."""
+        if not self.first_render:
+            return  # Don't update before first render
+            
+        all_steps = [
+            "Conectando ao site",
+            "Aplicando filtros", 
+            "Carregando resultados",
+            "Baixando PDFs",
+            "Processamento AI",
+            "Finalizando"
+        ]
+        
+        if self.current_step in all_steps:
+            step_index = all_steps.index(self.current_step)
+            line_number = self.steps_start_line + step_index
+            
+            # Build the step line with animation
+            animation = self.animation_frames[self.animation_index]
+            step_line = f"⋯ {self.current_step}{animation}"
+            
+            # Add detail if available
+            if self.current_detail:
+                step_line += f" ({self.current_detail})"
+            
+            # Add PDF progress if applicable
+            if self.current_step == "Baixando PDFs" and self.pdf_total > 0:
+                step_line += f" ({self.pdf_current}/{self.pdf_total})"
+            
+            # Move cursor to step line and update
+            print(f"\033[{line_number};1H\033[K{step_line}", end='', flush=True)
+            # Move cursor to bottom to avoid interference
+            print(f"\033[20;1H", end='', flush=True)
+    
+    def _full_render(self):
+        """Render the complete interface."""
+        self.terminal.clear_screen()
+        print("========================================")
+        print("         EM PROCESSAMENTO") 
+        print("========================================")
+        print("")
+        
+        # Show configuration summary
+        config_summary = self._format_config()
+        print(f"Configuração: {config_summary}")
+        print("")
+        
+        # Show elapsed time (will be updated by thread)
+        elapsed = datetime.now() - self.start_time
+        total_minutes = elapsed.total_seconds() / 60
+        self.last_timer_line = f"Tempo decorrido: {total_minutes:.1f} minutos"
+        print(self.last_timer_line)
+        print("")
+        
+        # Show process steps
+        print("Etapas do processo:")
+        
+        all_steps = [
+            "Conectando ao site",
+            "Aplicando filtros",
+            "Carregando resultados", 
+            "Baixando PDFs",
+            "Processamento AI",
+            "Finalizando"
+        ]
+        
+        for step_name in all_steps:
+            if step_name in self.steps_completed:
+                print(f"✓ {step_name}")
+            elif step_name == self.current_step:
+                # Initial render with animation
+                animation = self.animation_frames[self.animation_index]
+                step_line = f"⋯ {step_name}{animation}"
+                if self.current_detail:
+                    step_line += f" ({self.current_detail})"
+                if step_name == "Baixando PDFs" and self.pdf_total > 0:
+                    step_line += f" ({self.pdf_current}/{self.pdf_total})"
+                print(step_line)
+            else:
+                print(f"  {step_name}")
+        
+        print("")
+        print("Pressione Ctrl+C para cancelar")
+        
+        # Mark first render as complete and position cursor safely
+        self.first_render = True
+        print(f"\033[20;1H", end='', flush=True)  # Move cursor to bottom
+    
+    def _format_config(self) -> str:
+        """Format configuration for display."""
+        parts = []
+        
+        # Handle year
+        if self.config.get('year_range'):
+            start_year, end_year = self.config['year_range']
+            parts.append(f"Anos: {start_year}-{end_year}")
+        elif 'year' in self.config:
+            if self.config['year'] == 999:
+                parts.append("Ano: Todos")
+            else:
+                parts.append(f"Ano: {self.config['year']}")
+        
+        # Handle month
+        if self.config.get('month_range'):
+            start_month, end_month = self.config['month_range']
+            months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                     'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+            start_name = months[start_month - 1]
+            end_name = months[end_month - 1]
+            parts.append(f"Meses: {start_name}-{end_name}")
+        elif 'month' in self.config:
+            if self.config['month'] == 13:
+                parts.append("Mês: Todos")
+            elif 1 <= self.config['month'] <= 12:
+                months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                parts.append(f"Mês: {months[self.config['month']-1]}")
+        
+        return " | ".join(parts) if parts else "Configuração padrão"
 
 
 class PortalSaudeUI:
@@ -160,14 +394,56 @@ class PortalSaudeUI:
                 return self.ESC_PRESSED
             return user_input
     
+    def show_selected_filters(self, year=None, year_range=None, month=None, month_range=None):
+        """Mostra os filtros já selecionados no topo da tela."""
+        filters = []
+        
+        if year_range:
+            start_year, end_year = year_range
+            filters.append(f"Ano: {start_year}-{end_year}")
+        elif year is not None:
+            if year == 999:
+                filters.append("Ano: Todos")
+            elif year == 998:
+                filters.append("Ano: Intervalo personalizado")
+            else:
+                filters.append(f"Ano: {year}")
+        
+        if month_range:
+            start_month, end_month = month_range
+            month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+            start_name = month_names[start_month - 1]
+            end_name = month_names[end_month - 1]
+            filters.append(f"Mês: {start_name}-{end_name}")
+        elif month is not None:
+            if month == 13:
+                filters.append("Mês: Todos")
+            elif month == 14:
+                filters.append("Mês: Intervalo personalizado")
+            elif 1 <= month <= 12:
+                month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                             'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                filters.append(f"Mês: {month_names[month-1]}")
+        
+        if filters:
+            print("Filtros selecionados: " + " | ".join(filters))
+            print("")
+
     def show_config_screen(self) -> Optional[Dict[str, Any]]:
         """Show Portal Saude MG configuration screen."""
+        year = None
+        year_range = None
+        month = None
+        month_range = None
+        
         while True:
             self.terminal.clear_screen()
             print("========================================")
             print("   PORTAL SAUDE MG - RESOLUÇÕES")
             print("========================================")
             print("")
+            self.show_selected_filters(year, year_range, month, month_range)
             print("Site: portal-antigo.saude.mg.gov.br/deliberacoes")
             print("")
             print("Configuracoes automaticas aplicadas:")
@@ -178,44 +454,50 @@ class PortalSaudeUI:
             print("Configure os filtros:")
             print("")
             
-            # Get year
-            year = self.get_year_input("1. Ano (obrigatorio):")
-            if year is None:  # ESC was pressed or invalid input
-                return None  # Return to main menu
-            if year == "ESC":
-                return None
+            # Step 1: Get year if not set
+            if year is None:
+                year = self.get_year_input("1. Ano (obrigatorio):")
+                if year is None:  # invalid input or ESC
+                    return None  # Return to main menu
+                continue  # Refresh screen with new filter
             
-            # Handle year range input
-            year_range = None
-            if year == 998:  # Intervalo personalizado de anos
+            # Step 2: Get year range if year range option selected
+            if year == 998 and year_range is None:  # Intervalo personalizado de anos
                 year_range = self.get_year_range_input()
                 if year_range is None:  # ESC was pressed
-                    continue  # Go back to year selection
-                if year_range == "ESC":
+                    year = None  # Go back to year selection
                     continue
+                continue  # Refresh screen with new filter
                 
-            # Get month
-            month = self.get_month_input("2. Mes:")
-            if month is None:  # ESC was pressed
-                continue  # Go back to year selection
-            if month == "ESC":
-                continue
+            # Step 3: Get month if not set
+            if month is None:
+                month = self.get_month_input("2. Mes:")
+                if month is None:  # ESC was pressed
+                    if year == 998:
+                        year_range = None  # Go back to year range
+                    else:
+                        year = None  # Go back to year selection
+                    continue
+                continue  # Refresh screen with new filter
                 
-            # Handle month range input
-            month_range = None
-            if month == 14:  # Intervalo personalizado de meses
+            # Step 4: Get month range if month range option selected
+            if month == 14 and month_range is None:  # Intervalo personalizado de meses
                 month_range = self.get_month_range_input()
                 if month_range is None:  # ESC was pressed
-                    continue  # Go back to month selection
-                if month_range == "ESC":
+                    month = None  # Go back to month selection
                     continue
+                continue  # Refresh screen with new filter
             
+            # All filters selected - show confirmation
+            print("✓ Todos os filtros configurados!")
             print("")
             print("1. Iniciar coleta")
-            print("2. Voltar ao menu principal")
+            print("2. Modificar ano")
+            print("3. Modificar mês")
+            print("4. Voltar ao menu principal")
             print("")
             
-            choice = self._get_key_input("Digite sua opcao (1-2): ")
+            choice = self._get_key_input("Digite sua opcao (1-4): ")
             
             if choice == self.ESC_PRESSED:
                 return None  # Return to main menu
@@ -235,6 +517,12 @@ class PortalSaudeUI:
                 
                 return config
             elif choice == "2":
+                year = None  # Reset year to modify
+                year_range = None  # Also reset year range
+            elif choice == "3":
+                month = None  # Reset month to modify
+                month_range = None  # Also reset month range
+            elif choice == "4":
                 return None
             else:
                 self.terminal.show_error("Opcao invalida. Tente novamente.")
@@ -411,50 +699,63 @@ class PortalSaudeUI:
             self.run_scraping_task(config)
     
     def run_scraping_task(self, config: Dict[str, Any]):
-        """Run the scraping task."""
-        self.show_processing_screen(config)
+        """Run the scraping task with interactive progress display."""
+        # Initialize interactive progress display
+        progress = InteractiveProgressDisplay(self.terminal, config)
         
         try:
             # Start logging session
             logger.start_session(f"{config['site']}_scraping")
             set_context(site=config['site'])
             
+            # Enable silent mode to prevent console pollution
+            logger.enable_silent_mode()
             logger.info(f"Iniciando scraping: {config}")
             
-            # Import and run the Portal Saude MG scraper
+            # Start interactive progress display
+            progress.start()
+            
+            # Show initial status
+            progress.show_status("Conectando ao site", "Inicializando navegador")
+            
+            # Import and create scraper
             from src.modules.sites.portal_saude_mg import PortalSaudeMGScraper
             scraper = PortalSaudeMGScraper()
             
-            # Handle range-based processing
-            if config.get('year_range') or config.get('month_range'):
-                result = self.process_custom_range(scraper, config)
-                
-            elif config['year'] == 999:  # Todos os anos
-                result = self.process_all_years(scraper, config)
-                
-            elif config.get('month') == 13:  # Todos os meses de um ano específico
-                ano = str(config['year'])
-                result = self.process_all_months_for_year(scraper, ano)
-                
-            else:
-                # Ano e mês específicos (comportamento original)
-                ano = str(config['year'])
-                mes = f"{config['month']:02d}" if config.get('month') else None
-                set_context(year=ano, month=mes)
-                result = scraper.execute_scraping(ano, mes)
+            # Execute scraping with progress updates
+            result = self._execute_scraping_with_callbacks(scraper, config, progress)
             
             logger.info(f"Scraping finalizado: {result.get('success', False)}")
             
-            # Se scraping foi bem-sucedido, tentar processamento AI
+            # Process with AI if scraping was successful
             if result.get('success', False):
-                final_result = self.process_pdfs_with_ai(result, config)
+                final_result = self._process_ai_with_callbacks(result, config, progress)
+                
+                # Capture real elapsed time before stopping progress display
+                actual_elapsed_minutes = progress.get_elapsed_time()
+                
+                # Stop progress display and show results
+                progress.stop()
+                logger.disable_silent_mode()
                 logger.end_session()
-                self.show_success_screen(final_result)
+                self.show_success_screen(final_result, actual_elapsed_minutes)
             else:
+                # Capture real elapsed time before stopping progress display
+                actual_elapsed_minutes = progress.get_elapsed_time()
+                
+                # Stop progress display and show error
+                progress.stop()
+                logger.disable_silent_mode()
                 logger.end_session()
                 self.show_error_screen(result)
                 
         except Exception as e:
+            # Capture real elapsed time before stopping progress display
+            actual_elapsed_minutes = progress.get_elapsed_time()
+            
+            # Stop progress display on error
+            progress.stop()
+            logger.disable_silent_mode()
             logger.error(f"Erro fatal durante scraping: {str(e)}")
             logger.exception("Stack trace completo:")
             logger.end_session()
@@ -465,6 +766,71 @@ class PortalSaudeUI:
                 'site': config['site']
             }
             self.show_error_screen(error_result)
+    
+    def _execute_scraping_with_callbacks(self, scraper, config: Dict[str, Any], progress: InteractiveProgressDisplay) -> Dict[str, Any]:
+        """Execute scraping with progress callbacks."""
+        completed_steps = ["Conectando ao site"]
+        
+        # Apply filters
+        progress.show_status("Aplicando filtros", "Configurando ano e mês", completed_steps)
+        
+        # Create callback function to update progress
+        def progress_callback(stage, detail, current=None, total=None):
+            if stage == "loading_results":
+                completed_steps_copy = completed_steps + ["Aplicando filtros"] if "Aplicando filtros" not in completed_steps else completed_steps
+                progress.show_status("Carregando resultados", detail, completed_steps_copy)
+            elif stage == "downloading_pdfs":
+                completed_steps_copy = completed_steps + ["Aplicando filtros", "Carregando resultados"]
+                if current and total:
+                    progress.set_pdf_progress(current, total)
+                progress.show_status("Baixando PDFs", detail, completed_steps_copy)
+        
+        if config.get('year_range') or config.get('month_range'):
+            result = self.process_custom_range(scraper, config, progress_callback)
+        elif config['year'] == 999:  # Todos os anos
+            result = self.process_all_years(scraper, config, progress_callback)
+        elif config.get('month') == 13:  # Todos os meses de um ano específico
+            ano = str(config['year'])
+            result = self.process_all_months_for_year(scraper, ano, progress_callback)
+        else:
+            # Single month/year
+            ano = str(config['year'])
+            mes = f"{config['month']:02d}" if config.get('month') else None
+            set_context(year=ano, month=mes)
+            
+            completed_steps.append("Aplicando filtros")
+            progress.show_status("Aplicando filtros", "Ano e mês configurados", completed_steps)
+            
+            result = scraper.execute_scraping(ano, mes, progress_callback)
+        
+        # Show final scraping status
+        if result.get('success'):
+            # All steps should already be completed via callbacks
+            files_count = len(result.get('files_downloaded', []))
+            completed_steps_final = ["Conectando ao site", "Aplicando filtros", "Carregando resultados", "Baixando PDFs"]
+            # Show completed status without active step to avoid confusion
+            progress.show_status("", f"Downloads concluídos - {files_count} arquivos", completed_steps_final)
+        
+        return result
+    
+    def _process_ai_with_callbacks(self, result: Dict[str, Any], config: Dict[str, Any], progress: InteractiveProgressDisplay) -> Dict[str, Any]:
+        """Process PDFs with AI and update progress."""
+        completed_steps = ["Conectando ao site", "Aplicando filtros", "Carregando resultados", "Baixando PDFs"]
+        
+        files_count = len(result.get('files_downloaded', []))
+        progress.show_status("Processamento AI", f"Analisando {files_count} PDFs", completed_steps)
+        
+        # Process with AI
+        final_result = self.process_pdfs_with_ai(result, config)
+        
+        # Show completion
+        completed_steps.append("Processamento AI")
+        if final_result.get('ai_processing', {}).get('success'):
+            progress.show_status("Finalizando", "Tabela Excel gerada com sucesso", completed_steps)
+        else:
+            progress.show_status("Finalizando", "AI com problemas - PDFs baixados", completed_steps)
+        
+        return final_result
 
     def verify_ai_dependencies(self) -> Dict[str, Any]:
         """Verifica se dependências AI estão disponíveis."""
@@ -598,7 +964,7 @@ class PortalSaudeUI:
                 'successful_extractions': successful_extractions,
                 'failed_extractions': failed_extractions,
                 'total_tokens_used': total_tokens,
-                'estimated_cost_usd': total_tokens * 0.000002,  # Rough estimate for GPT-4o-mini
+                'estimated_cost_usd': 'consultar no API provider',
                 'excel_file': table_result.get('output_file'),
                 'table_stats': {
                     'total_rows': table_result.get('total_rows', 0),
@@ -659,45 +1025,10 @@ class PortalSaudeUI:
 
     def update_processing_screen(self, status_message: str):
         """Atualizar tela de processamento com novo status."""
-        # Por enquanto só log, depois podemos implementar atualização visual
+        # Deprecated: Now using ProgressTracker for dynamic updates
         logger.info(f"Status: {status_message}")
 
-    def show_processing_screen(self, config: Dict[str, Any]):
-        """Show processing screen with progress indicators."""
-        self.terminal.clear_screen()
-        print("========================================")
-        print("           EM PROCESSAMENTO")
-        print("========================================")
-        print("")
-        print(f"Site: {self.site_info['name']}")
-        print(f"Configuracao: {self.format_config_summary(config)}")
-        print("")
-        print("Status atual: Iniciando processo...")
-        print("")
-        
-        # Show progress steps
-        steps = [
-            "Conectando ao site",
-            "Aplicando filtros", 
-            "Coletando links de download",
-            "Baixando arquivos",
-            "Verificando dependências AI",
-            "Processando PDFs com IA",
-            "Gerando tabela Excel",
-            "Finalizando"
-        ]
-        
-        for step in steps:
-            print(f"[ ] {step}")
-        
-        print("")
-        print("Aguarde... O processo pode levar alguns minutos.")
-        print("• Scraping: 1-3 minutos")
-        print("• Processamento AI: 2-5 minutos (depende do número de PDFs)")
-        print("")
-        print("Pressione Ctrl+C para cancelar")
-
-    def show_success_screen(self, result: Dict[str, Any]):
+    def show_success_screen(self, result: Dict[str, Any], actual_elapsed_minutes: float = None):
         """Show success screen with results."""
         self.terminal.clear_screen()
         print("========================================")
@@ -730,7 +1061,10 @@ class PortalSaudeUI:
             print(f"- Arquivos coletados: {len(result.get('files_downloaded', []))} arquivos")
             
         print(f"- Tamanho total: {result.get('total_size_mb', 0):.1f} MB")
-        print(f"- Tempo decorrido: {result.get('duration_minutes', 0):.1f} minutos")
+        
+        # Use actual elapsed time from progress display if available, otherwise fallback to result time
+        elapsed_time = actual_elapsed_minutes if actual_elapsed_minutes is not None else result.get('duration_minutes', 0)
+        print(f"- Tempo decorrido: {elapsed_time:.1f} minutos")
         
         # Mostrar resumo adicional se disponível
         if result.get('summary'):
@@ -749,7 +1083,7 @@ class PortalSaudeUI:
             if ai_info.get('failed_extractions', 0) > 0:
                 print(f"⚠ Extrações com erro: {ai_info.get('failed_extractions', 0)}")
             print(f"✓ Tokens consumidos: {ai_info.get('total_tokens_used', 0):,}")
-            print(f"✓ Custo estimado: ${ai_info.get('estimated_cost_usd', 0):.4f}")
+            print(f"✓ Custo estimado: {ai_info.get('estimated_cost_usd', 'consultar no API provider')}")
             
             excel_file = ai_info.get('excel_file')
             if excel_file:
@@ -1008,6 +1342,7 @@ class PortalSaudeUI:
         print("")
         
         input("Pressione Enter para continuar...")
+    
 
     def format_config_summary(self, config: Dict[str, Any]) -> str:
         """Format configuration summary for display."""
@@ -1051,7 +1386,7 @@ class PortalSaudeUI:
         
         return ", ".join(parts)
     
-    def process_custom_range(self, scraper, config: Dict[str, Any]) -> Dict[str, Any]:
+    def process_custom_range(self, scraper, config: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """Process custom year and/or month ranges."""
         year_range = config.get('year_range')
         month_range = config.get('month_range')
@@ -1105,7 +1440,7 @@ class PortalSaudeUI:
                 set_context(year=ano, month=mes)
                 
                 try:
-                    result = scraper.execute_scraping(ano, mes)
+                    result = scraper.execute_scraping(ano, mes, progress_callback)
                     files_count = len(result.get('files_downloaded', []))
                     
                     if files_count > 0:
@@ -1181,7 +1516,7 @@ class PortalSaudeUI:
         
         return consolidated_result
 
-    def process_all_years(self, scraper, config: Dict[str, Any]) -> Dict[str, Any]:
+    def process_all_years(self, scraper, config: Dict[str, Any], progress_callback=None) -> Dict[str, Any]:
         """Process all available years."""
         current_year = datetime.now().year
         years_to_check = list(range(current_year, 1999, -1))  # Current year back to 2000
@@ -1200,12 +1535,12 @@ class PortalSaudeUI:
             
             try:
                 if config.get('month') == 13:  # Todos os meses para este ano
-                    year_result = self.process_all_months_for_year(scraper, ano)
+                    year_result = self.process_all_months_for_year(scraper, ano, progress_callback)
                 else:
                     # Mês específico para este ano
                     mes = f"{config['month']:02d}" if config.get('month') else None
                     set_context(year=ano, month=mes)
-                    year_result = scraper.execute_scraping(ano, mes)
+                    year_result = scraper.execute_scraping(ano, mes, progress_callback)
                 
                 files_in_year = len(year_result.get('files_downloaded', []))
                 
@@ -1230,7 +1565,7 @@ class PortalSaudeUI:
         logger.info(f"Processamento de todos os anos concluído: {years_processed} anos, {total_files_found} arquivos")
         return self.consolidate_yearly_results(all_year_results, years_processed, total_files_found, years_with_data)
 
-    def process_all_months_for_year(self, scraper, ano: str) -> Dict[str, Any]:
+    def process_all_months_for_year(self, scraper, ano: str, progress_callback=None) -> Dict[str, Any]:
         """Process all months for a specific year."""
         all_results = []
         total_files_found = 0
@@ -1250,7 +1585,7 @@ class PortalSaudeUI:
             logger.info(f"Processando {month_name}/{ano}")
             
             try:
-                result = scraper.execute_scraping(ano, mes)
+                result = scraper.execute_scraping(ano, mes, progress_callback)
                 
                 # Parar se não houver links (provável mês futuro)
                 if result.get('total_files', 0) == 0:
