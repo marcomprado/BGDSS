@@ -226,12 +226,29 @@ class InteractiveProgressDisplay:
         
         # Handle month
         if 'month' in self.config:
-            if self.config['month'] == 13:
-                parts.append("Mês: Todos")
-            elif 1 <= self.config['month'] <= 12:
-                months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-                parts.append(f"Mês: {months[self.config['month']-1]}")
+            month = self.config['month']
+            if isinstance(month, dict):
+                if month.get('type') == 'all':
+                    parts.append("Mês: Todos")
+                elif month.get('type') == 'single':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    parts.append(f"Mês: {month_names[month['month']-1]}")
+                elif month.get('type') == 'multiple':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    months_str = ', '.join([month_names[m-1] for m in month['months'][:3]])
+                    if len(month['months']) > 3:
+                        months_str += '...'
+                    parts.append(f"Meses: {months_str}")
+            else:
+                # Legacy support for integer month values
+                if month == 13:
+                    parts.append("Mês: Todos")
+                elif 1 <= month <= 12:
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    parts.append(f"Mês: {month_names[month-1]}")
         
         # Handle UF
         if 'uf' in self.config:
@@ -398,12 +415,28 @@ class MDSSaldoUI:
                 filters.append("Anos: Todos")
         
         if month:
-            if month == 13:
-                filters.append("Mês: Todos")
-            elif 1 <= month <= 12:
-                months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-                filters.append(f"Mês: {months[month-1]}")
+            if isinstance(month, dict):
+                if month.get('type') == 'all':
+                    filters.append("Mês: Todos")
+                elif month.get('type') == 'single':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    filters.append(f"Mês: {month_names[month['month']-1]}")
+                elif month.get('type') == 'multiple':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    months_str = ', '.join([month_names[m-1] for m in month['months'][:3]])
+                    if len(month['months']) > 3:
+                        months_str += '...'
+                    filters.append(f"Meses: {months_str}")
+            else:
+                # Legacy support for integer month values
+                if month == 13:
+                    filters.append("Mês: Todos")
+                elif 1 <= month <= 12:
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    filters.append(f"Mês: {month_names[month-1]}")
         
         if uf:
             filters.append(f"Estado: {uf}")
@@ -634,30 +667,106 @@ class MDSSaldoUI:
             self.terminal.show_error("Formato inválido. Use números separados por vírgula (ex: 2020, 2022, 2024).")
             return None
 
-    def get_month_input(self, prompt: str) -> Optional[int]:
+    def get_month_input(self, prompt: str) -> Optional[Dict[str, Any]]:
         """Get and validate month input."""
         print(prompt)
+        print("   Digite um mês específico ou:")
         print("   1) Janeiro    2) Fevereiro   3) Marco")
         print("   4) Abril      5) Maio        6) Junho")
         print("   7) Julho      8) Agosto      9) Setembro")
         print("   10) Outubro   11) Novembro   12) Dezembro")
         print("   13) Todos os meses")
+        print("   14) Vários meses (ex: 1,3,5 ou 1-6)")
         print("")
         
-        month_str = self._get_key_input("   Digite sua opcao (1-13): ")
+        month_str = self._get_key_input("   Digite sua opcao: ")
         
         if month_str == self.ESC_PRESSED:
             return None  # Signal to go back
         
+        # Check for option 14 (multiple months)
+        if month_str == "14":
+            return self.get_multiple_months_input()
+        
         try:
             month = int(month_str)
             if 1 <= month <= 13:
-                return month
+                if month == 13:
+                    return {'type': 'all'}
+                else:
+                    return {'type': 'single', 'month': month}
             else:
-                self.terminal.show_error("Opcao deve estar entre 1 e 13.")
+                self.terminal.show_error("Opcao deve estar entre 1 e 14.")
                 return None
         except ValueError:
             self.terminal.show_error("Opcao invalida. Digite um numero.")
+            return None
+    
+    def get_multiple_months_input(self) -> Optional[Dict[str, Any]]:
+        """Get multiple months input from user."""
+        print("   Configure vários meses:")
+        print("   Exemplos:")
+        print("   - Meses específicos: 1,3,5,7 (Jan, Mar, Mai, Jul)")
+        print("   - Intervalo: 1-6 (Janeiro até Junho)")
+        print("   - Combinado: 1,3,5-8,12 (Jan, Mar, Mai-Ago, Dez)")
+        print("")
+        
+        months_str = self._get_key_input("   Digite os meses: ")
+        if months_str == self.ESC_PRESSED:
+            return None
+        
+        try:
+            months = set()
+            
+            # Split by comma first
+            parts = [part.strip() for part in months_str.split(',')]
+            
+            for part in parts:
+                if '-' in part:
+                    # Handle range (e.g., "1-6")
+                    range_parts = part.split('-')
+                    if len(range_parts) == 2:
+                        start = int(range_parts[0].strip())
+                        end = int(range_parts[1].strip())
+                        
+                        if start < 1 or start > 12 or end < 1 or end > 12:
+                            self.terminal.show_error("Meses devem estar entre 1 e 12.")
+                            return None
+                        
+                        if start > end:
+                            self.terminal.show_error("Mês inicial deve ser menor ou igual ao final no intervalo.")
+                            return None
+                        
+                        for month in range(start, end + 1):
+                            months.add(month)
+                    else:
+                        self.terminal.show_error("Formato de intervalo inválido. Use formato 'início-fim' (ex: 1-6).")
+                        return None
+                else:
+                    # Handle single month
+                    month = int(part)
+                    if month < 1 or month > 12:
+                        self.terminal.show_error("Meses devem estar entre 1 e 12.")
+                        return None
+                    months.add(month)
+            
+            if not months:
+                self.terminal.show_error("Pelo menos um mês válido deve ser informado.")
+                return None
+            
+            # Convert to sorted list
+            months_list = sorted(list(months))
+            
+            # Display confirmation
+            month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                          'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+            month_names_str = ', '.join([month_names[m-1] for m in months_list])
+            print(f"   Meses configurados: {month_names_str} ({len(months_list)} meses)")
+            
+            return {'type': 'multiple', 'months': months_list}
+            
+        except ValueError:
+            self.terminal.show_error("Formato inválido. Use números de 1-12, vírgulas e hífens (ex: 1,3,5-8,12).")
             return None
     
     def get_uf_input(self, prompt: str) -> Optional[str]:
@@ -990,12 +1099,27 @@ class MDSSaldoUI:
         
         # Handle month
         if 'month' in config:
-            if config['month'] == 13:
-                parts.append("Mês: Todos")
-            elif 1 <= config['month'] <= 12:
-                months = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
-                         'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
-                parts.append(f"Mês: {months[config['month']-1]}")
+            month = config['month']
+            if isinstance(month, dict):
+                if month.get('type') == 'all':
+                    parts.append("Mês: Todos")
+                elif month.get('type') == 'single':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    parts.append(f"Mês: {month_names[month['month']-1]}")
+                elif month.get('type') == 'multiple':
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    months_str = ', '.join([month_names[m-1] for m in month['months']])
+                    parts.append(f"Meses: {months_str}")
+            else:
+                # Legacy support for integer month values
+                if month == 13:
+                    parts.append("Mês: Todos")
+                elif 1 <= month <= 12:
+                    month_names = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
+                                  'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
+                    parts.append(f"Mês: {month_names[month-1]}")
         
         # Handle UF
         if 'uf' in config:
