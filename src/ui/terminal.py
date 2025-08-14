@@ -17,6 +17,7 @@ from typing import Dict, Any
 from .portal_saude_ui import PortalSaudeUI
 from .mds_parcelas_ui import MDSParcelasUI
 from .mds_saldo_ui import MDSSaldoUI
+from src.utils.parallel_runner import run_all_sites_parallel
 
 
 class BrazilianSitesTerminal:
@@ -56,7 +57,7 @@ class BrazilianSitesTerminal:
         try:
             while self.running:
                 self.show_main_menu()
-                choice = self.get_user_input("Digite sua opcao (1-4, 11): ")
+                choice = self.get_user_input("Digite sua opcao (1-5, 11): ")
                 
                 try:
                     choice_num = int(choice)
@@ -66,6 +67,12 @@ class BrazilianSitesTerminal:
                         return {'status': 'exit', 'message': 'Saindo...'}
                     elif choice_num in [1, 2, 3]:
                         self.handle_site_selection(choice_num)
+                    elif choice_num == 5:
+                        run_all_sites_parallel(
+                            self.portal_saude_ui, 
+                            self.mds_parcelas_ui, 
+                            self.mds_saldo_ui
+                        )
                     elif choice_num == 11:
                         self.clear_downloads()
                     else:
@@ -93,6 +100,7 @@ class BrazilianSitesTerminal:
         print("2. MDS - Parcelas Pagas")
         print("3. MDS - Saldo Detalhado por Conta")
         print("4. Sair")
+        print("5. Executar Todos os Sites (Paralelo)")
         print("")
         print("11. Limpar Downloads")
         print("")
@@ -170,10 +178,15 @@ class BrazilianSitesTerminal:
             pass
 
 
-def run_brazilian_sites_terminal():
+def run_brazilian_sites_terminal(direct_site: int = None):
     """Run the Brazilian sites terminal interface."""
     terminal = BrazilianSitesTerminal()
-    return terminal.start()
+    if direct_site:
+        # Run specific site directly without showing menu
+        terminal.handle_site_selection(direct_site)
+        return {'status': 'completed'}
+    else:
+        return terminal.start()
 
 
 if __name__ == "__main__":

@@ -29,14 +29,26 @@ EXEMPLO DE USO:
 """
 
 import sys
+import argparse
 
 from src.ui.terminal import run_brazilian_sites_terminal
 
 
 def main() -> int:
     """Main application entry point."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Brazilian Government Sites Web Scraper')
+    parser.add_argument('--site', type=int, choices=[1, 2, 3], 
+                       help='Run specific site: 1=Portal Saude MG, 2=MDS Parcelas, 3=MDS Saldo')
+    args = parser.parse_args()
+    
     try:
-        result = run_brazilian_sites_terminal()
+        if args.site:
+            # Run specific site directly
+            result = run_brazilian_sites_terminal(direct_site=args.site)
+        else:
+            # Run normal interactive terminal
+            result = run_brazilian_sites_terminal()
         
         if result.get('status') == 'exit':
             return 0
