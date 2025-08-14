@@ -893,32 +893,36 @@ class PortalSaudeUI:
             processor = ai_check['processor']
             generator = ai_check['generator']
             
-            # Determinar diretório de PDFs
-            pdf_directory = scraping_result.get('download_path', 'downloads/raw/portal_saude_mg')
-            logger.info(f"Processando PDFs do diretório: {pdf_directory}")
-            
             # Atualizar tela de progresso
             self.update_processing_screen("Processando PDFs com IA...")
             
-            # Processar PDFs um por vez para evitar limite de tokens
-            from pathlib import Path
-            pdf_dir = Path(pdf_directory)
-            pdf_files = list(pdf_dir.glob("*.pdf"))
+            # Processar apenas os PDFs baixados nesta sessão usando files_downloaded
+            files_to_process = []
             
-            # Carregar URL mapping se existir
-            url_mapping = self._load_url_mapping_from_dir(pdf_dir)
-            logger.info(f"Processando {len(pdf_files)} PDFs sequencialmente")
+            # Coletar arquivos da sessão atual a partir de files_downloaded
+            for file_info in downloaded_files:
+                file_path = file_info.get('file_path')
+                if file_path and os.path.exists(file_path):
+                    files_to_process.append({
+                        'path': file_path,
+                        'url': file_info.get('url'),
+                        'title': file_info.get('title')
+                    })
+                    logger.debug(f"Arquivo da sessão adicionado: {os.path.basename(file_path)}")
+                else:
+                    logger.warning(f"Arquivo da sessão não encontrado: {file_path}")
+            
+            logger.info(f"Processando {len(files_to_process)} PDFs da sessão atual")
             
             processing_results = []
-            for i, pdf_file in enumerate(pdf_files):
-                logger.info(f"Processando arquivo {i+1}/{len(pdf_files)}: {pdf_file.name}")
+            for i, file_data in enumerate(files_to_process):
+                logger.info(f"Processando arquivo {i+1}/{len(files_to_process)}: {os.path.basename(file_data['path'])}")
                 
-                # Obter URL para este arquivo se disponível
-                file_url = None
-                if url_mapping and pdf_file.name in url_mapping:
-                    file_url = url_mapping[pdf_file.name]['url']
-                
-                result = processor.process_single_pdf(str(pdf_file), file_link=file_url)
+                # Processar com URL já associada do scraping
+                result = processor.process_single_pdf(
+                    file_data['path'], 
+                    file_link=file_data['url']
+                )
                 processing_results.append(result)
             
             if not processing_results:
@@ -932,9 +936,12 @@ class PortalSaudeUI:
             # Atualizar tela de progresso
             self.update_processing_screen("Gerando tabela Excel...")
             
+            # Determinar nome do diretório fonte para a tabela Excel
+            source_directory = scraping_result.get('download_path', 'portal_saude_mg_session')
+            
             # Gerar tabela Excel
             table_result = generator.process_extraction_results_to_table(
-                processing_results, pdf_directory
+                processing_results, source_directory
             )
             
             if not table_result.get('success', False):
@@ -1006,22 +1013,6 @@ class PortalSaudeUI:
         self.show_ai_error_screen(result_with_error, config)
         return result_with_error
 
-    def _load_url_mapping_from_dir(self, pdf_directory) -> Optional[Dict[str, Dict[str, str]]]:
-        """Carregar URL mapping do diretório de PDFs."""
-        try:
-            mapping_file = pdf_directory / 'url_mapping.json'
-            if not mapping_file.exists():
-                return None
-            
-            import json
-            with open(mapping_file, 'r', encoding='utf-8') as f:
-                url_mapping = json.load(f)
-            
-            if isinstance(url_mapping, dict):
-                return url_mapping
-            return None
-        except Exception:
-            return None
 
     def update_processing_screen(self, status_message: str):
         """Atualizar tela de processamento com novo status."""

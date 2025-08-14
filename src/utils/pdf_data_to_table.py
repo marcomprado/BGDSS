@@ -457,17 +457,8 @@ class PDFTableGenerator:
             logger.info(f"URL mapping loaded successfully from: {mapping_file} ({len(url_mapping)} entries)")
             return url_mapping
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in URL mapping file: {e}")
-            return None
-        except PermissionError as e:
-            logger.error(f"Permission denied reading URL mapping file: {e}")
-            return None
-        except UnicodeDecodeError as e:
-            logger.error(f"Encoding error reading URL mapping file: {e}")
-            return None
         except Exception as e:
-            logger.warning(f"Unexpected error loading URL mapping: {e}")
+            logger.error(f"Error loading URL mapping: {e}")
             return None
 
     def get_processing_summary(self, processing_results: List[Dict[str, Any]]) -> Dict[str, Any]:

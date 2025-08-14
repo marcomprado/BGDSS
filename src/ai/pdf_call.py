@@ -509,17 +509,8 @@ Retorne os dados extraídos no seguinte formato JSON (Se Mantenha extremamente f
             logger.info(f"URL mapping loaded successfully from: {mapping_file} ({len(url_mapping)} entries)")
             return url_mapping
             
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in URL mapping file: {e}")
-            return None
-        except PermissionError as e:
-            logger.error(f"Permission denied reading URL mapping file: {e}")
-            return None
-        except UnicodeDecodeError as e:
-            logger.error(f"Encoding error reading URL mapping file: {e}")
-            return None
         except Exception as e:
-            logger.warning(f"Unexpected error loading URL mapping: {e}")
+            logger.error(f"Error loading URL mapping: {e}")
             return None
     
     def _save_intermediate_results(self, results: List[Dict[str, Any]], pdf_dir: Path) -> None:
@@ -530,27 +521,22 @@ Retorne os dados extraídos no seguinte formato JSON (Se Mantenha extremamente f
             results: Current processing results
             pdf_dir: Directory containing PDFs
         """
-        try:
-            import json
-            from datetime import datetime
-            
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            intermediate_file = pdf_dir / f'intermediate_results_{timestamp}.json'
-            
-            # Create a summary of results to save space
-            summary = {
-                'timestamp': timestamp,
-                'total_processed': len(results),
-                'successful': len([r for r in results if r.get('success', False)]),
-                'failed': len([r for r in results if not r.get('success', False)]),
-                'results': results  # Full results for recovery
-            }
-            
-            with open(intermediate_file, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
-            
-            logger.debug(f"Intermediate results saved to: {intermediate_file}")
-            
-        except Exception as e:
-            logger.warning(f"Failed to save intermediate results: {e}")
-            # Don't fail the main process for this
+        import json
+        from datetime import datetime
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        intermediate_file = pdf_dir / f'intermediate_results_{timestamp}.json'
+        
+        # Create a summary of results to save space
+        summary = {
+            'timestamp': timestamp,
+            'total_processed': len(results),
+            'successful': len([r for r in results if r.get('success', False)]),
+            'failed': len([r for r in results if not r.get('success', False)]),
+            'results': results  # Full results for recovery
+        }
+        
+        with open(intermediate_file, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        
+        logger.debug(f"Intermediate results saved to: {intermediate_file}")

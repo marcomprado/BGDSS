@@ -365,7 +365,8 @@ class PortalSaudeMGScraper:
             current_height = self.driver.execute_script("return document.body.scrollHeight")
             current_position = self.driver.execute_script("return window.pageYOffset + window.innerHeight")
             return current_position >= current_height - 200
-        except:
+        except Exception as e:
+            logger.debug(f"Error checking page bottom: {e}")
             return False
     
     def _count_current_results(self) -> int:
@@ -373,14 +374,15 @@ class PortalSaudeMGScraper:
         try:
             # Count by title links
             title_links = self.driver.find_elements(By.CSS_SELECTOR, "h2.title > a")
-            return len(title_links)
-        except:
-            try:
-                # Fallback: count by other result indicators
-                results = self.driver.find_elements(By.CSS_SELECTOR, ".result-item, .document-item, .item")
-                return len(results)
-            except:
-                return 0
+            if title_links:
+                return len(title_links)
+            
+            # Fallback: count by other result indicators
+            results = self.driver.find_elements(By.CSS_SELECTOR, ".result-item, .document-item, .item")
+            return len(results)
+        except Exception as e:
+            logger.debug(f"Error counting results: {e}")
+            return 0
     
     def _collect_pdf_links(self) -> List[Dict[str, str]]:
         """Collect all PDF links using exact selector: h2.title > a"""
@@ -614,14 +616,11 @@ class PortalSaudeMGScraper:
                        f"Disco livre: {disk_free_gb:.1f}GB")
                        
             # Log Chrome process memory if available
-            try:
-                chrome_processes = [p for p in psutil.process_iter(['pid', 'name', 'memory_info']) 
-                                 if 'chrome' in p.info['name'].lower()]
-                if chrome_processes:
-                    total_chrome_memory = sum(p.info['memory_info'].rss for p in chrome_processes) / (1024 * 1024)
-                    logger.info(f"Memória total do Chrome: {total_chrome_memory:.1f}MB ({len(chrome_processes)} processos)")
-            except:
-                pass  # Ignore if can't get Chrome process info
+            chrome_processes = [p for p in psutil.process_iter(['pid', 'name', 'memory_info']) 
+                             if 'chrome' in p.info['name'].lower()]
+            if chrome_processes:
+                total_chrome_memory = sum(p.info['memory_info'].rss for p in chrome_processes) / (1024 * 1024)
+                logger.info(f"Memória total do Chrome: {total_chrome_memory:.1f}MB ({len(chrome_processes)} processos)")
                 
         except Exception as e:
             logger.debug(f"Erro ao obter recursos do sistema: {e}")
@@ -698,15 +697,6 @@ class PortalSaudeMGScraper:
                         f"Title: {page_title[:50]}{'...' if len(page_title) > 50 else ''}, "
                         f"Window: {window_size['width']}x{window_size['height']}")
             
-            # Check for JavaScript errors
-            try:
-                js_errors = self.driver.execute_script("""
-                    return window.jsErrors || [];
-                """)
-                if js_errors:
-                    logger.warning(f"JavaScript errors detectados ({context}): {len(js_errors)} erros")
-            except:
-                pass
                 
         except Exception as e:
             logger.debug(f"Erro ao obter estado do browser ({context}): {e}")

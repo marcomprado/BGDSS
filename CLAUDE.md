@@ -50,10 +50,16 @@ This is a **modular scraping system** with site-specific scrapers that inherit c
 5. Results processed through AI pipeline and saved to organized directory structure
 
 **Site Scraper Architecture**:
-- **UI Layer**: Site-specific UI classes handle user interaction and configuration
-- **Scraper Layer**: Site modules in `src/modules/sites/` implement `execute_scraping(ano, mes)` method
+- **UI Layer**: Site-specific UI classes with real-time progress tracking via `InteractiveProgressDisplay`
+- **Scraper Layer**: Site modules in `src/modules/sites/` implement `execute_scraping(ano, mes, progress_callback=None)` method
 - **Processing Layer**: AI-powered PDF analysis and Excel generation via `src/ai/` and `src/utils/`
 - **Configuration**: Centralized settings via singleton pattern in `config/settings.py`
+
+**Real-Time UI System**:
+- **InteractiveProgressDisplay**: Threaded real-time updates with ANSI cursor control
+- **Progress Callbacks**: Scrapers report status changes via callback functions to update UI
+- **Synchronization**: Timer and step progression synchronized between scraper and display
+- **Animation System**: Loading animations (`.`, `..`, `...`) and PDF download counters
 
 **Supported Government Sites**:
 1. **Portal Saude MG** (`portal_saude_mg.py`) - Health resolutions PDFs (fully implemented)
@@ -116,6 +122,7 @@ downloads/
 - **Model Configuration**: Configurable via `OPENAI_MODEL` environment variable (no default - must be set)
 - **PDF Analysis**: Converts unstructured PDF content to structured Excel data with intelligent field extraction
 - **Municipality Correction**: AI-powered correction of municipality names in extracted data
+- **Cost Display**: Shows "consultar no API provider" instead of estimates for accurate billing transparency
 - **Graceful Degradation**: System works for basic scraping without AI, but PDF processing requires API key
 
 ### Memory and Performance
@@ -129,3 +136,43 @@ downloads/
 - Only accesses publicly available information
 - Implements proper delay between requests
 - Name of the project is BGDSS - Brazilian Government Data Scraping System
+
+## UI Implementation Guidelines
+
+### Interactive Progress System
+The system uses a sophisticated real-time UI with threaded updates and progress callbacks:
+
+**InteractiveProgressDisplay Pattern**:
+- Thread-safe updates using `threading.Lock()`
+- ANSI escape codes for precise cursor positioning (`\033[line;columnH`)
+- Real-time timer with decimal minutes format (e.g., "1.5 minutos")
+- Step-by-step progress tracking with completion checkmarks
+
+**Progress Callback Integration**:
+- Scrapers must support `progress_callback` parameter in `execute_scraping()` method
+- Callback stages: `"loading_results"`, `"downloading_pdfs"` with optional current/total counters
+- UI updates synchronized with actual scraper progress to prevent display lag
+
+**Logger Silent Mode**:
+- Use `logger.enable_silent_mode()` during UI operations to prevent console pollution
+- File logging continues normally while console output is suppressed
+- Always call `logger.disable_silent_mode()` after UI completion
+
+### Site Scraper Implementation Pattern
+When implementing new site scrapers, follow this callback-enabled pattern:
+
+```python
+def execute_scraping(self, ano: str, mes: str = None, progress_callback=None) -> Dict[str, Any]:
+    # Report progress stages
+    if progress_callback:
+        progress_callback("loading_results", "Expanding document list")
+    
+    # Later in download loop
+    if progress_callback:
+        progress_callback("downloading_pdfs", "Downloading PDFs", current, total)
+```
+
+### Time Synchronization
+- UI timer and final summary must use same time source via `InteractiveProgressDisplay.get_elapsed_time()`
+- Capture elapsed time before calling `progress.stop()` to ensure accuracy
+- Pass actual elapsed time to `show_success_screen()` for consistent reporting
