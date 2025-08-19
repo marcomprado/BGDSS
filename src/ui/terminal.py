@@ -57,7 +57,7 @@ class BrazilianSitesTerminal:
         try:
             while self.running:
                 self.show_main_menu()
-                choice = self.get_user_input("Digite sua opcao (1-5, 11): ")
+                choice = self.get_user_input("Digite sua opcao (1-6, 11): ")
                 
                 try:
                     choice_num = int(choice)
@@ -73,6 +73,15 @@ class BrazilianSitesTerminal:
                             self.mds_parcelas_ui, 
                             self.mds_saldo_ui
                         )
+                    elif choice_num == 6:
+                        # Open configuration terminal
+                        from src.ui.config_terminal import run_configuration
+                        if run_configuration(force=True):
+                            # Reload settings after configuration
+                            from config.settings import settings
+                            settings.reload()
+                            print("\nConfigurações atualizadas com sucesso!")
+                            input("Pressione Enter para continuar...")
                     elif choice_num == 11:
                         self.clear_downloads()
                     else:
@@ -101,6 +110,7 @@ class BrazilianSitesTerminal:
         print("3. MDS - Saldo Detalhado por Conta")
         print("4. Sair")
         print("5. Executar Todos os Sites (Paralelo)")
+        print("6. Configurações (API Key, Provedor IA)")
         print("")
         print("11. Limpar Downloads")
         print("")
