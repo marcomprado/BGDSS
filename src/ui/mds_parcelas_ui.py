@@ -7,9 +7,6 @@ de ano, estado (UF) e município.
 """
 
 import sys
-import select
-import termios
-import tty
 import os
 import time
 import threading
@@ -281,52 +278,66 @@ class MDSParcelasUI:
     
     def _get_key_unix(self) -> str:
         """Unix/Linux/macOS key detection."""
-        old_settings = termios.tcgetattr(sys.stdin)
         try:
-            tty.setraw(sys.stdin.fileno())
+            # Import Unix-specific modules only when needed
+            import termios
+            import tty
+            import select
             
-            # Read input character by character
-            chars = []
-            while True:
-                if select.select([sys.stdin], [], [], 0.1)[0]:
-                    char = sys.stdin.read(1)
-                    
-                    # ESC key (ASCII 27)
-                    if ord(char) == 27:
-                        # Check if it's a real ESC or part of escape sequence
-                        if select.select([sys.stdin], [], [], 0.1)[0]:
-                            # It's an escape sequence, consume it
-                            next_char = sys.stdin.read(1)
-                            if next_char == '[':
-                                # Arrow keys, function keys, etc.
-                                sys.stdin.read(1)  # consume the rest
-                                continue
-                        else:
-                            # Real ESC key
-                            return self.ESC_PRESSED
-                    
-                    # Enter key
-                    elif ord(char) in [10, 13]:  # \n or \r
-                        break
-                    
-                    # Backspace
-                    elif ord(char) == 127:
-                        if chars:
-                            chars.pop()
-                            sys.stdout.write('\b \b')
+            old_settings = termios.tcgetattr(sys.stdin)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                
+                # Read input character by character
+                chars = []
+                while True:
+                    if select.select([sys.stdin], [], [], 0.1)[0]:
+                        char = sys.stdin.read(1)
+                        
+                        # ESC key (ASCII 27)
+                        if ord(char) == 27:
+                            # Check if it's a real ESC or part of escape sequence
+                            if select.select([sys.stdin], [], [], 0.1)[0]:
+                                # It's an escape sequence, consume it
+                                next_char = sys.stdin.read(1)
+                                if next_char == '[':
+                                    # Arrow keys, function keys, etc.
+                                    sys.stdin.read(1)  # consume the rest
+                                    continue
+                            else:
+                                # Real ESC key
+                                return self.ESC_PRESSED
+                        
+                        # Enter key
+                        elif ord(char) in [10, 13]:  # \n or \r
+                            break
+                        
+                        # Backspace
+                        elif ord(char) == 127:
+                            if chars:
+                                chars.pop()
+                                sys.stdout.write('\b \b')
+                                sys.stdout.flush()
+                        
+                        # Regular character
+                        elif ord(char) >= 32:  # Printable characters
+                            chars.append(char)
+                            sys.stdout.write(char)
                             sys.stdout.flush()
-                    
-                    # Regular character
-                    elif ord(char) >= 32:  # Printable characters
-                        chars.append(char)
-                        sys.stdout.write(char)
-                        sys.stdout.flush()
-            
-            print()  # New line after input
-            return ''.join(chars).strip()
-            
-        finally:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                
+                print()  # New line after input
+                return ''.join(chars).strip()
+                
+            finally:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        
+        except (ImportError, ModuleNotFoundError, OSError):
+            # Fallback: aceitar tanto ESC físico quanto 'esc' digitado
+            print("(Digite 'esc' para voltar)")
+            user_input = input().strip().lower()
+            if user_input == 'esc':
+                return self.ESC_PRESSED
+            return user_input
     
     def _get_key_windows(self) -> str:
         """Windows key detection - fallback to regular input with ESC simulation."""
