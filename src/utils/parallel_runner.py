@@ -82,13 +82,38 @@ def _open_macos_terminals(python_cmd, main_script):
 
 
 def _open_windows_terminals(python_cmd, main_script):
-    """Open terminals on Windows using start command."""
+    """Open terminals on Windows using start command with error handling."""
     sites = [1, 2, 3]
     site_names = ["Portal-Saude", "MDS-Parcelas", "MDS-Saldo"]
     
     for i, site_num in enumerate(sites):
-        cmd = f'start "{site_names[i]}" cmd /k "{python_cmd} {main_script} --site={site_num}"'
-        subprocess.Popen(cmd, shell=True)
+        try:
+            # Use cmd /c instead of /k to avoid keeping terminal open on error
+            # Escape quotes properly for Windows command line
+            cmd = f'start "{site_names[i]}" cmd /k ""{python_cmd}" "{main_script}" --site={site_num}""'
+            process = subprocess.Popen(cmd, shell=True, 
+                                     stdout=subprocess.PIPE, 
+                                     stderr=subprocess.PIPE,
+                                     creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0)
+            
+            # Brief check if process started successfully
+            import time
+            time.sleep(0.5)
+            if process.poll() is not None and process.returncode != 0:
+                # Try fallback method without start command
+                fallback_cmd = f'"{python_cmd}" "{main_script}" --site={site_num}'
+                print(f"[AVISO] Falha ao abrir terminal para {site_names[i]}, tentando execução direta...")
+                subprocess.Popen(fallback_cmd, shell=True, creationflags=subprocess.CREATE_NEW_CONSOLE if hasattr(subprocess, 'CREATE_NEW_CONSOLE') else 0)
+                
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"[ERRO] Não foi possível abrir terminal para {site_names[i]}: {e}")
+            print(f"       Tentando execução sem nova janela...")
+            try:
+                # Last resort: run without new window
+                fallback_cmd = f'"{python_cmd}" "{main_script}" --site={site_num}'
+                subprocess.Popen(fallback_cmd, shell=True)
+            except Exception as fallback_error:
+                print(f"[ERRO CRÍTICO] Falha completa para {site_names[i]}: {fallback_error}")
 
 
 def _open_linux_terminals(python_cmd, main_script):
