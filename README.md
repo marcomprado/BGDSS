@@ -1,116 +1,91 @@
 # BGDSS - Brazilian Government Data Scraping System
 
-A Python application for automated data extraction from Brazilian government websites with AI-powered PDF processing.
+Sistema Python para extração automatizada de dados de sites do governo brasileiro com processamento inteligente de PDFs usando IA.
 
-## Overview
+## O que faz
 
-BGDSS (Brazilian Government Data Scraping System) extracts data from Brazilian government websites and processes PDF documents using AI to generate structured Excel files. The system includes a terminal-based interface for site selection and configuration.
+O BGDSS extrai dados de portais de transparência do governo brasileiro e processa documentos PDF usando inteligência artificial para gerar planilhas Excel estruturadas. 
 
-## Requirements
+O sistema baixa automaticamente PDFs de sites governamentais, extrai informações importantes usando IA, e organiza tudo em planilhas Excel prontas para análise.
 
-- Python 3.8+
-- OpenAI API key (optional, for AI PDF processing)
-- Chrome/Chromium browser (for web scraping)
+## Como usar
 
-## Installation
-
-1. Clone the repository
-2. Install dependencies:
+1. Instale as dependências:
    ```bash
    pip install -r requirements.txt
    ```
-3. Configure OpenAI API key (optional):
+
+2. Configure sua chave da OpenAI no arquivo `.env`:
    ```bash
-   echo "OPENAI_API_KEY=your_api_key_here" > .env
+   OPENAI_API_KEY=sua_chave_aqui
+   OPENAI_MODEL=gpt-4o-mini
    ```
-4. Run the application:
+
+3. Execute o aplicativo:
    ```bash
    python main.py
    ```
 
-## Supported Sites
+4. Selecione um site do menu e configure os parâmetros (ano, mês)
 
-The system currently supports 3 government sites, with different implementation status:
+## Sites suportados
 
-### 1. Portal Saude MG - Health Resolutions (WORKING)
-- **URL**: https://portal-antigo.saude.mg.gov.br/deliberacoes
-- **Status**: Fully implemented and functional
-- **Data Type**: PDF resolutions and deliberations
-- **Features**: Complete scraping, AI PDF processing, Excel generation
+### 1. Portal Saúde MG ✅ FUNCIONANDO
+- **Site**: Deliberações da Secretaria de Saúde de MG
+- **Status**: Completamente implementado
+- **Funcionalidades**: Baixa PDFs automaticamente e extrai dados estruturados para Excel
 
-### 2. MDS Parcelas Pagas - Municipal Payments (NOT IMPLEMENTED)
-- **Status**: Interface exists but scraping logic not implemented
-- **Data Type**: Municipal payment installments
-- **Note**: Requires development
+### 2. MDS Parcelas Pagas ✅ FUNCIONANDO
+- **Site**: Dados de parcelas pagas aos municípios
+- **Status**: Completamente implementado
+- **Funcionalidades**: Interface e scraping implementados
 
-### 3. MDS Saldo Detalhado - Account Balances (NOT IMPLEMENTED) 
-- **Status**: Interface exists but scraping logic not implemented
-- **Data Type**: Detailed account balance information
-- **Note**: Requires development
+### 3. MDS Saldo Detalhado ✅ FUNCIONANDO
+- **Site**: Dados detalhados de saldo municipal
+- **Status**: Completamente implementado
+- **Funcionalidades**: Interface avançada com seleção múltipla de meses
 
-## Features
+## O que o sistema extrai
 
-### Web Scraping
-- Automated PDF downloading from government sites
-- Configurable filters (year, month)
-- Error handling and retry logic
-- Sequential file naming
+Para o Portal Saúde MG, o sistema extrai das deliberações em PDF:
+- Número da deliberação
+- Objeto/finalidade
+- Datas importantes (início, prazo)
+- Municípios beneficiados
+- Valores e códigos orçamentários
+- Categorização automática
+- Link direto para o PDF original
 
-### AI Processing (Optional)
-- PDF text extraction using OpenAI API
-- Structured data extraction from government resolutions
-- Automatic categorization based on budget allocation codes
-- Excel file generation with processed data
+## Arquitetura
 
-### Data Output
-The system extracts the following information from PDF resolutions:
-- Resolution number
-- Related resolutions
-- Resolution object/purpose
-- Initial date
-- Execution deadline
-- Usage restrictions
-- Budget allocation
-- Direct link to source PDF
-- Automatic category classification
+O sistema é organizado de forma modular:
 
-## Usage
+- **Interface**: Terminal interativo com progresso em tempo real
+- **Scrapers**: Módulos específicos para cada site governamental  
+- **Processamento IA**: Extração inteligente de dados dos PDFs
+- **Saída**: Geração automática de planilhas Excel organizadas
 
-1. Run `python main.py`
-2. Select a government site from the menu
-3. Configure extraction parameters (year, month)
-4. The system will:
-   - Download PDFs from the selected site
-   - Process PDFs with AI (if API key configured)
-   - Generate Excel file with structured data
-
-## Project Structure
-
+### Estrutura de pastas
 ```
 src/
-├── ai/                     # AI processing modules
-├── modules/sites/          # Site-specific scrapers
-├── ui/                     # Terminal interface
-├── utils/                  # Utilities and logging
-config/                     # Configuration files
-downloads/                  # Downloaded and processed files
-logs/                       # Application logs
+├── ai/              # Módulos de IA
+├── modules/sites/   # Scrapers específicos por site
+├── ui/             # Interface do terminal
+└── utils/          # Utilitários e logs
+
+downloads/          # Arquivos baixados e processados
+logs/              # Logs da aplicação
 ```
 
-## Configuration
+## Requisitos
 
-The system uses environment variables for configuration:
-- `OPENAI_API_KEY`: Required for AI PDF processing
-- `LOG_LEVEL`: Logging level (default: INFO)
-- Various timeout and retry settings
+- Python 3.8+
+- Navegador Chrome (para o scraping)
+- Chave da API OpenAI (para processamento com IA)
 
-## Notes
+## Observações
 
-- AI processing requires an OpenAI API key and will consume tokens
-- The system respects robots.txt and implements rate limiting
-- Only Portal Saude MG is currently fully functional
-- Excel files include both original data and AI-processed categorizations
-
-## License
-
-MIT License - see LICENSE file for details.
+- O processamento com IA consome tokens da OpenAI
+- Todos os 3 sites estão funcionais
+- O Portal Saúde MG inclui processamento completo com IA
+- As planilhas Excel são geradas automaticamente com dados estruturados
