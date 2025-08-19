@@ -45,17 +45,6 @@ O sistema baixa automaticamente PDFs de sites governamentais, extrai informaçõ
 - **Status**: Completamente implementado
 - **Funcionalidades**: Interface avançada com seleção múltipla de meses
 
-## O que o sistema extrai
-
-Para o Portal Saúde MG, o sistema extrai das deliberações em PDF:
-- Número da deliberação
-- Objeto/finalidade
-- Datas importantes (início, prazo)
-- Municípios beneficiados
-- Valores e códigos orçamentários
-- Categorização automática
-- Link direto para o PDF original
-
 ## Arquitetura
 
 O sistema é organizado de forma modular:
