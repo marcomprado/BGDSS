@@ -38,6 +38,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 
 from .settings import settings
+from src.utils.resource_utils import get_bundled_driver_path, is_frozen
 
 
 class WebDriverConfig:
@@ -97,13 +98,22 @@ class WebDriverConfig:
         
     def _get_download_directory(self) -> str:
         """Obtém o diretório de download configurado."""
-        default_dir = str(Path(__file__).parent.parent / 'downloads' / 'raw')
-        return getattr(settings, 'DOWNLOAD_DIR', default_dir)
+        # Use the RAW_DOWNLOADS_DIR from settings (which now handles executable paths correctly)
+        return str(settings.RAW_DOWNLOADS_DIR)
     
     def _detect_driver_path(self, browser: str) -> Optional[str]:
         """Detecta automaticamente o path do driver com suporte adequado para diferentes arquiteturas."""
         try:
             if browser == 'chrome':
+                # First, try bundled driver for executables
+                if is_frozen():
+                    driver_names = ['chromedriver.exe', 'chromedriver']
+                    for driver_name in driver_names:
+                        bundled_driver = get_bundled_driver_path(driver_name)
+                        if bundled_driver:
+                            print(f"Using bundled ChromeDriver: {bundled_driver}")
+                            return bundled_driver
+                
                 # Clear cache and force fresh download
                 import os
                 import platform
@@ -121,40 +131,63 @@ class WebDriverConfig:
                     print(f"Using system ChromeDriver: {system_driver}")
                     return system_driver
                 
-                # Use ChromeDriverManager as fallback
-                manager = ChromeDriverManager()
-                
-                # Install and verify the driver
-                driver_path = manager.install()
-                
-                # Verify the driver is a valid executable binary
-                if self._is_valid_driver_binary(driver_path):
-                    import stat
-                    # Make sure it's executable
-                    os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-                    print(f"ChromeDriver installed at: {driver_path}")
-                    return driver_path
+                # Use ChromeDriverManager as fallback (avoid in frozen apps when possible)
+                if not is_frozen():
+                    manager = ChromeDriverManager()
+                    
+                    # Install and verify the driver
+                    driver_path = manager.install()
+                    
+                    # Verify the driver is a valid executable binary
+                    if self._is_valid_driver_binary(driver_path):
+                        import stat
+                        # Make sure it's executable
+                        os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                        print(f"ChromeDriver installed at: {driver_path}")
+                        return driver_path
+                    else:
+                        print(f"Invalid ChromeDriver binary at: {driver_path}")
+                        # Try to find the actual binary in the directory
+                        actual_binary = self._find_chromedriver_binary(driver_path)
+                        if actual_binary:
+                            print(f"Found actual ChromeDriver binary at: {actual_binary}")
+                            return actual_binary
+                        return None
                 else:
-                    print(f"Invalid ChromeDriver binary at: {driver_path}")
-                    # Try to find the actual binary in the directory
-                    actual_binary = self._find_chromedriver_binary(driver_path)
-                    if actual_binary:
-                        print(f"Found actual ChromeDriver binary at: {actual_binary}")
-                        return actual_binary
+                    print("Running as executable but no bundled ChromeDriver found")
                     return None
                     
             elif browser == 'firefox':
-                manager = GeckoDriverManager(
-                    cache_valid_range=1
-                )
-                driver_path = manager.install()
+                # First, try bundled driver for executables
+                if is_frozen():
+                    driver_names = ['geckodriver.exe', 'geckodriver']
+                    for driver_name in driver_names:
+                        bundled_driver = get_bundled_driver_path(driver_name)
+                        if bundled_driver:
+                            print(f"Using bundled GeckoDriver: {bundled_driver}")
+                            return bundled_driver
                 
-                if os.path.exists(driver_path):
-                    import stat
-                    os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
-                    print(f"GeckoDriver installed at: {driver_path}")
-                    return driver_path
+                # Try system-installed driver
+                import shutil
+                system_driver = shutil.which('geckodriver')
+                if system_driver:
+                    print(f"Using system GeckoDriver: {system_driver}")
+                    return system_driver
+                
+                # Use GeckoDriverManager as fallback (avoid in frozen apps when possible)
+                if not is_frozen():
+                    manager = GeckoDriverManager(cache_valid_range=1)
+                    driver_path = manager.install()
+                    
+                    if os.path.exists(driver_path):
+                        import stat
+                        os.chmod(driver_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+                        print(f"GeckoDriver installed at: {driver_path}")
+                        return driver_path
+                    else:
+                        return None
                 else:
+                    print("Running as executable but no bundled GeckoDriver found")
                     return None
                     
         except Exception as e:

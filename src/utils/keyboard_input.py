@@ -10,6 +10,7 @@ import os
 from typing import Optional
 
 from src.utils.logger import logger
+from src.utils.resource_utils import is_frozen
 
 
 # Special return value for ESC key press
@@ -38,7 +39,10 @@ def get_key_input(prompt: str) -> str:
             return _get_key_windows()
     except (ImportError, ModuleNotFoundError, AttributeError, OSError) as e:
         # Fallback to regular input if special key detection fails
-        logger.info(f"Special key detection failed, using standard input: {e}")
+        if is_frozen():
+            logger.warning(f"Executable mode - special key detection failed, using fallback: {e}")
+        else:
+            logger.info(f"Special key detection failed, using standard input: {e}")
         return _get_key_fallback()
 
 
@@ -155,7 +159,11 @@ def _get_key_windows() -> str:
 
 def _get_key_fallback() -> str:
     """Fallback method using standard input with ESC simulation."""
-    print("(Digite 'esc' para voltar)")
+    if is_frozen():
+        print("(Digite 'esc' para voltar, ou pressione Enter para continuar)")
+    else:
+        print("(Digite 'esc' para voltar)")
+    
     user_input = input().strip().lower()
     if user_input == 'esc':
         return ESC_PRESSED

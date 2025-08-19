@@ -10,6 +10,12 @@ from dotenv import load_dotenv
 
 from src.utils.exceptions import ConfigurationError
 from src.utils.logger import logger
+from src.utils.resource_utils import (
+    get_env_file_path, 
+    get_user_data_path, 
+    ensure_directory_exists,
+    is_frozen
+)
 
 
 class Settings:
@@ -32,12 +38,14 @@ class Settings:
     
     def _load_environment(self) -> None:
         """Load environment variables from .env file."""
-        env_path = Path(__file__).parent.parent / '.env'
-        if env_path.exists():
+        env_path = get_env_file_path()
+        if os.path.exists(env_path):
             load_dotenv(env_path)
             logger.info(f"Loaded environment from {env_path}")
         else:
             logger.warning("No .env file found, using system environment variables")
+            if is_frozen():
+                logger.info("Running as executable - .env file should be next to the executable")
     
     def _initialize_settings(self) -> None:
         """Initialize all settings with defaults."""
@@ -59,7 +67,9 @@ class Settings:
         
         self.LOG_LEVEL: str = os.getenv('LOG_LEVEL', 'INFO')
         
-        self.BASE_DIR: Path = Path(__file__).parent.parent
+        # Use user data path for persistent data (works for both dev and executable)
+        user_data_path = get_user_data_path()
+        self.BASE_DIR: Path = Path(user_data_path)
         self.DOWNLOADS_DIR: Path = self.BASE_DIR / 'downloads'
         self.RAW_DOWNLOADS_DIR: Path = self.DOWNLOADS_DIR / 'raw'
         self.PROCESSED_DOWNLOADS_DIR: Path = self.DOWNLOADS_DIR / 'processed'
@@ -95,8 +105,14 @@ class Settings:
         ]
         
         for directory in directories:
-            directory.mkdir(parents=True, exist_ok=True)
+            ensure_directory_exists(directory)
             logger.debug(f"Ensured directory exists: {directory}")
+        
+        # Log the base directory location for user reference
+        if is_frozen():
+            logger.info(f"Application data directory (executable): {self.BASE_DIR}")
+        else:
+            logger.debug(f"Application data directory (development): {self.BASE_DIR}")
     
     def _validate_settings(self) -> None:
         """Validate required settings."""
