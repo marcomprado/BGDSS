@@ -516,8 +516,8 @@ class MDSParcelasScraper:
         """Aguarda o download do arquivo CSV ser concluído."""
         start_time = time.time()
         
-        # Chrome está baixando em downloads/raw/, não em downloads/raw/mds_parcelas/
-        actual_download_dir = self.download_base_path.parent  # Isso dará downloads/raw/
+        # Chrome está baixando corretamente no diretório configurado
+        actual_download_dir = self.download_base_path  # Usa downloads/raw/mds_parcelas/
         
         while time.time() - start_time < timeout:
             # Busca arquivos CSV no diretório real de download
