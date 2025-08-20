@@ -24,6 +24,7 @@ import requests
 
 from src.utils.logger import logger
 from config.webdriver_config import create_configured_driver
+from config.settings import settings
 
 
 class PortalSaudeMGScraper:
@@ -34,7 +35,7 @@ class PortalSaudeMGScraper:
     
     def __init__(self):
         self.base_url = "https://portal-antigo.saude.mg.gov.br/deliberacoes/documents?by_year=0&by_month=&by_format=pdf&category_id=4795&ordering=newest"
-        self.download_base_path = Path("downloads/raw/portal_saude_mg")
+        self.download_base_path = settings.RAW_DOWNLOADS_DIR / "portal_saude_mg"
         self.driver = None
         self.wait_timeout_implicit = 10  # 10 seconds implicit timeout
         self.wait_timeout_explicit = 30  # 30 seconds explicit timeout

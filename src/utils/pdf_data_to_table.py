@@ -16,6 +16,7 @@ import os
 
 from src.ai.pdf_call import PDFProcessor
 from src.utils.logger import logger
+from config.settings import settings
 
 
 class PDFTableGenerator:
@@ -26,7 +27,7 @@ class PDFTableGenerator:
     
     def __init__(self):
         """Initialize the table generator."""
-        self.processed_base_path = Path("downloads/processed")
+        self.processed_base_path = settings.PROCESSED_DOWNLOADS_DIR
         self.processed_base_path.mkdir(parents=True, exist_ok=True)
         
         # Column definitions for the output table

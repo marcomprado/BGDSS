@@ -25,6 +25,7 @@ import pandas as pd
 
 from src.utils.logger import logger
 from config.webdriver_config import create_configured_driver
+from config.settings import settings
 
 
 class MDSSaldoScraper:
@@ -35,8 +36,8 @@ class MDSSaldoScraper:
     
     def __init__(self):
         self.base_url = "https://aplicacoes.mds.gov.br/suaswebcons/restrito/execute.jsf?b=*tbmepQbsdfmbtQbhbtNC&event=*fyjcjs"
-        # Usar caminho absoluto para garantir que o WebDriver e o programa usem o mesmo diretório
-        self.download_base_path = Path("downloads/raw/mds_saldo").absolute()
+        # Usar caminho do settings para compatibilidade com executável
+        self.download_base_path = settings.RAW_DOWNLOADS_DIR / "mds_saldo"
         self.driver = None
         self.wait = None
         self.wait_timeout = 30
