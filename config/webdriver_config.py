@@ -27,6 +27,7 @@ PADRÕES DE DESIGN:
 import os
 import platform
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 from selenium import webdriver
@@ -39,6 +40,22 @@ from webdriver_manager.firefox import GeckoDriverManager
 
 from .settings import settings
 from src.utils.resource_utils import get_bundled_driver_path, is_frozen
+
+
+class ChromeDriverWithCleanup(webdriver.Chrome):
+    """Chrome WebDriver with automatic cleanup of temporary user data directory."""
+    
+    def __init__(self, *args, **kwargs):
+        self._cleanup_callback = kwargs.pop('cleanup_callback', None)
+        super().__init__(*args, **kwargs)
+    
+    def quit(self):
+        """Override quit to include cleanup."""
+        try:
+            super().quit()
+        finally:
+            if self._cleanup_callback:
+                self._cleanup_callback()
 
 
 class WebDriverConfig:
@@ -95,6 +112,7 @@ class WebDriverConfig:
         self.window_size = getattr(settings, 'WINDOW_SIZE', (1920, 1080))
         self.timeout = getattr(settings, 'WEBDRIVER_TIMEOUT', 30)
         self.download_dir = self._get_download_directory()
+        self._temp_user_data_dir = None  # Store temp directory path for cleanup
         
     def _get_download_directory(self) -> str:
         """Obtém o diretório de download configurado."""
@@ -273,6 +291,18 @@ class WebDriverConfig:
         
         return None
     
+    def _cleanup_temp_user_data_dir(self):
+        """Clean up the temporary user data directory."""
+        if hasattr(self, '_temp_user_data_dir') and self._temp_user_data_dir:
+            try:
+                import shutil
+                if os.path.exists(self._temp_user_data_dir):
+                    shutil.rmtree(self._temp_user_data_dir, ignore_errors=True)
+                    print(f"Cleaned up temporary Chrome profile: {self._temp_user_data_dir}")
+                self._temp_user_data_dir = None
+            except Exception as e:
+                print(f"Warning: Could not clean up temporary directory {self._temp_user_data_dir}: {e}")
+    
     def _get_user_agent(self, agent_type: str = 'default') -> str:
         """Obtém user agent baseado no tipo solicitado."""
         return self.USER_AGENTS.get(agent_type, self.USER_AGENTS['default'])
@@ -280,6 +310,13 @@ class WebDriverConfig:
     def _create_chrome_options(self, **kwargs) -> ChromeOptions:
         """Cria opções personalizadas para Chrome."""
         options = ChromeOptions()
+        
+        # Create unique temporary user data directory to prevent session conflicts
+        temp_user_data_dir = tempfile.mkdtemp(prefix=f'chrome_profile_{uuid.uuid4().hex[:8]}_')
+        options.add_argument(f'--user-data-dir={temp_user_data_dir}')
+        
+        # Store the temp directory for cleanup later
+        self._temp_user_data_dir = temp_user_data_dir
         
         # Opções básicas
         for option in self.DEFAULT_CHROME_OPTIONS:
@@ -393,8 +430,8 @@ class WebDriverConfig:
                 return self._create_chrome_driver(**kwargs)
             raise
     
-    def _create_chrome_driver(self, **kwargs) -> webdriver.Chrome:
-        """Cria driver do Chrome."""
+    def _create_chrome_driver(self, **kwargs) -> ChromeDriverWithCleanup:
+        """Cria driver do Chrome com cleanup automático."""
         options = self._create_chrome_options(**kwargs)
         
         # Service configuration
@@ -403,7 +440,12 @@ class WebDriverConfig:
         if driver_path:
             service = ChromeService(driver_path)
         
-        driver = webdriver.Chrome(service=service, options=options)
+        # Create driver with cleanup callback
+        driver = ChromeDriverWithCleanup(
+            service=service, 
+            options=options,
+            cleanup_callback=self._cleanup_temp_user_data_dir
+        )
         
         # Configurações pós-inicialização
         driver.set_page_load_timeout(self.timeout)
