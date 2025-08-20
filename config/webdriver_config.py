@@ -44,6 +44,13 @@ from webdriver_manager.firefox import GeckoDriverManager
 from .settings import settings
 from src.utils.resource_utils import get_bundled_driver_path, is_frozen
 
+# Try to import psutil for batch detection, but don't fail if not available
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+
 
 class ChromeDriverWithCleanup(webdriver.Chrome):
     """Chrome WebDriver with automatic cleanup of temporary user data directory."""
@@ -81,24 +88,26 @@ class WebDriverConfig:
             return False
         
         # Check if parent process is cmd.exe or if running from a .bat file
-        try:
-            import psutil
-            current_process = psutil.Process()
-            parent = current_process.parent()
-            if parent:
-                parent_name = parent.name().lower()
-                # Check if parent is cmd.exe or if command line contains .bat
-                if 'cmd.exe' in parent_name or 'cmd' in parent_name:
-                    return True
-                # Check command line for .bat reference
-                cmdline = ' '.join(parent.cmdline()).lower()
-                if '.bat' in cmdline:
-                    return True
-        except:
-            # If psutil is not available or fails, check environment
-            # When running from batch file, certain environment variables are set
-            if os.environ.get('PROMPT') or os.environ.get('CMDCMDLINE'):
-                return True
+        if PSUTIL_AVAILABLE:
+            try:
+                current_process = psutil.Process()
+                parent = current_process.parent()
+                if parent:
+                    parent_name = parent.name().lower()
+                    # Check if parent is cmd.exe or if command line contains .bat
+                    if 'cmd.exe' in parent_name or 'cmd' in parent_name:
+                        return True
+                    # Check command line for .bat reference
+                    cmdline = ' '.join(parent.cmdline()).lower()
+                    if '.bat' in cmdline:
+                        return True
+            except:
+                pass  # Fall through to environment check
+        
+        # Fallback: check environment variables
+        # When running from batch file, certain environment variables are set
+        if os.environ.get('PROMPT') or os.environ.get('CMDCMDLINE'):
+            return True
         
         return False
     
@@ -374,9 +383,10 @@ class WebDriverConfig:
         user_agent_type = kwargs.get('user_agent_type', 'default')
         options.add_argument(f'--user-agent={self._get_user_agent(user_agent_type)}')
         
-        # Configurações de download
+        # Configurações de download - aceitar download_dir, download_path ou usar padrão
+        download_directory = kwargs.get('download_dir') or kwargs.get('download_path') or self.download_dir
         prefs = {
-            'download.default_directory': self.download_dir,
+            'download.default_directory': download_directory,
             'download.prompt_for_download': False,
             'download.directory_upgrade': True,
             'safebrowsing.enabled': True,
@@ -450,6 +460,7 @@ class WebDriverConfig:
                 - disable_images: Desabilitar imagens
                 - custom_options: Lista de opções customizadas
                 - driver_path: Path customizado do driver
+                - download_dir ou download_path: Diretório de download customizado
         
         Returns:
             Instância configurada do WebDriver
@@ -477,12 +488,8 @@ class WebDriverConfig:
         import time
         import random
         
-        # Add random delay to prevent simultaneous conflicts when running multiple instances
-        if platform.system() == 'Windows' and self._is_batch_execution():
-            delay = random.uniform(0, 2)  # 0-2 seconds random delay
-            time.sleep(delay)
-        
-        # Create unique temporary user data directory with PID and timestamp for maximum uniqueness
+        # Simplified: Always create unique temporary directory, regardless of batch execution
+        # This prevents any session conflicts
         pid = os.getpid()
         timestamp = int(time.time() * 1000)  # milliseconds timestamp
         random_suffix = uuid.uuid4().hex[:8]
@@ -523,60 +530,23 @@ class WebDriverConfig:
         if driver_path:
             service = ChromeService(driver_path)
         
-        # Create driver with retry logic for session conflicts
-        max_retries = 3
-        retry_count = 0
-        last_error = None
-        
-        while retry_count < max_retries:
+        # Create driver - simplified without complex retry logic
+        # The unique temp directory should prevent conflicts
+        try:
+            driver = ChromeDriverWithCleanup(
+                service=service, 
+                options=options,
+                temp_user_data_dir=temp_user_data_dir
+            )
+        except Exception as e:
+            # If creation fails, clean up the temp directory
             try:
-                driver = ChromeDriverWithCleanup(
-                    service=service, 
-                    options=options,
-                    temp_user_data_dir=temp_user_data_dir
-                )
-                break  # Success, exit retry loop
-            except SessionNotCreatedException as e:
-                last_error = e
-                error_msg = str(e)
-                
-                # Check if it's a session conflict error
-                if "user data directory is already in use" in error_msg or "user-data-dir" in error_msg:
-                    retry_count += 1
-                    print(f"Session conflict detected, retry {retry_count}/{max_retries}")
-                    
-                    # Clean up the failed directory
-                    try:
-                        import shutil
-                        if os.path.exists(temp_user_data_dir):
-                            shutil.rmtree(temp_user_data_dir, ignore_errors=True)
-                    except:
-                        pass
-                    
-                    if retry_count < max_retries:
-                        # Create a new unique directory for retry
-                        time.sleep(1)  # Brief pause before retry
-                        pid = os.getpid()
-                        timestamp = int(time.time() * 1000)
-                        random_suffix = uuid.uuid4().hex[:8]
-                        temp_user_data_dir = tempfile.mkdtemp(
-                            prefix=f'chrome_profile_{pid}_{timestamp}_{random_suffix}_retry{retry_count}_'
-                        )
-                        
-                        # Recreate options with new directory
-                        options = self._create_chrome_options(
-                            temp_user_data_dir=temp_user_data_dir,
-                            **kwargs
-                        )
-                    else:
-                        # Max retries reached, re-raise the error
-                        raise
-                else:
-                    # Not a session conflict, re-raise immediately
-                    raise
-        
-        if retry_count >= max_retries and last_error:
-            raise last_error
+                import shutil
+                if os.path.exists(temp_user_data_dir):
+                    shutil.rmtree(temp_user_data_dir, ignore_errors=True)
+            except:
+                pass
+            raise e
         
         # Configurações pós-inicialização
         driver.set_page_load_timeout(self.timeout)
