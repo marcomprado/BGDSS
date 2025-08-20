@@ -62,4 +62,3 @@ if %errorLevel% neq 0 (
 
 :: Pausar para manter a janela aberta
 echo.
-pause
