@@ -28,6 +28,8 @@ import os
 import platform
 import tempfile
 import uuid
+import time
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 from selenium import webdriver
@@ -35,6 +37,7 @@ from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.firefox.service import Service as FirefoxService
+from selenium.common.exceptions import SessionNotCreatedException
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.firefox import GeckoDriverManager
 
@@ -71,6 +74,33 @@ class ChromeDriverWithCleanup(webdriver.Chrome):
 
 class WebDriverConfig:
     """Configurador principal do WebDriver."""
+    
+    def _is_batch_execution(self) -> bool:
+        """Detect if running from a batch file on Windows."""
+        if platform.system() != 'Windows':
+            return False
+        
+        # Check if parent process is cmd.exe or if running from a .bat file
+        try:
+            import psutil
+            current_process = psutil.Process()
+            parent = current_process.parent()
+            if parent:
+                parent_name = parent.name().lower()
+                # Check if parent is cmd.exe or if command line contains .bat
+                if 'cmd.exe' in parent_name or 'cmd' in parent_name:
+                    return True
+                # Check command line for .bat reference
+                cmdline = ' '.join(parent.cmdline()).lower()
+                if '.bat' in cmdline:
+                    return True
+        except:
+            # If psutil is not available or fails, check environment
+            # When running from batch file, certain environment variables are set
+            if os.environ.get('PROMPT') or os.environ.get('CMDCMDLINE'):
+                return True
+        
+        return False
     
     # Configurações padrão para diferentes tipos de navegador
     DEFAULT_CHROME_OPTIONS = [
@@ -152,6 +182,23 @@ class WebDriverConfig:
                 system = platform.system().lower()
                 
                 print(f"Detected system: {system}, machine: {machine}")
+                
+                # Special handling for Windows batch execution
+                if system == 'windows' and self._is_batch_execution():
+                    # Look for chromedriver in the script directory first
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    project_root = os.path.dirname(os.path.dirname(script_dir))
+                    
+                    # Check in project root
+                    possible_paths = [
+                        os.path.join(project_root, 'chromedriver.exe'),
+                        os.path.join(project_root, 'drivers', 'chromedriver.exe'),
+                    ]
+                    
+                    for path in possible_paths:
+                        if os.path.exists(path) and os.path.isfile(path):
+                            print(f"Using ChromeDriver from project: {path}")
+                            return path
                 
                 # Try system-installed driver first
                 system_driver = shutil.which('chromedriver')
@@ -428,11 +475,19 @@ class WebDriverConfig:
     def _create_chrome_driver(self, **kwargs) -> ChromeDriverWithCleanup:
         """Cria driver do Chrome com cleanup automático e proteções para Windows."""
         import time
+        import random
         
-        # Create unique temporary user data directory with timestamp for better uniqueness
+        # Add random delay to prevent simultaneous conflicts when running multiple instances
+        if platform.system() == 'Windows' and self._is_batch_execution():
+            delay = random.uniform(0, 2)  # 0-2 seconds random delay
+            time.sleep(delay)
+        
+        # Create unique temporary user data directory with PID and timestamp for maximum uniqueness
+        pid = os.getpid()
         timestamp = int(time.time() * 1000)  # milliseconds timestamp
+        random_suffix = uuid.uuid4().hex[:8]
         temp_user_data_dir = tempfile.mkdtemp(
-            prefix=f'chrome_profile_{uuid.uuid4().hex[:8]}_{timestamp}_'
+            prefix=f'chrome_profile_{pid}_{timestamp}_{random_suffix}_'
         )
         
         # Windows-specific optimizations
@@ -444,6 +499,15 @@ class WebDriverConfig:
                 '--no-sandbox',            # Required when running as admin on Windows
                 '--disable-software-rasterizer',  # Windows rendering optimization
             ]
+            
+            # Additional options for batch execution to prevent conflicts
+            if self._is_batch_execution():
+                windows_options.extend([
+                    '--disable-features=RendererCodeIntegrity',  # Helps with multiple instances
+                    '--disable-features=IsolateOrigins',  # Reduces isolation overhead
+                    '--disable-site-isolation-trials',  # Prevents some conflicts
+                ])
+            
             # Merge Windows options with existing custom options
             kwargs['custom_options'] = existing_custom_options + windows_options
         
@@ -459,12 +523,60 @@ class WebDriverConfig:
         if driver_path:
             service = ChromeService(driver_path)
         
-        # Create driver with temporary directory for cleanup
-        driver = ChromeDriverWithCleanup(
-            service=service, 
-            options=options,
-            temp_user_data_dir=temp_user_data_dir
-        )
+        # Create driver with retry logic for session conflicts
+        max_retries = 3
+        retry_count = 0
+        last_error = None
+        
+        while retry_count < max_retries:
+            try:
+                driver = ChromeDriverWithCleanup(
+                    service=service, 
+                    options=options,
+                    temp_user_data_dir=temp_user_data_dir
+                )
+                break  # Success, exit retry loop
+            except SessionNotCreatedException as e:
+                last_error = e
+                error_msg = str(e)
+                
+                # Check if it's a session conflict error
+                if "user data directory is already in use" in error_msg or "user-data-dir" in error_msg:
+                    retry_count += 1
+                    print(f"Session conflict detected, retry {retry_count}/{max_retries}")
+                    
+                    # Clean up the failed directory
+                    try:
+                        import shutil
+                        if os.path.exists(temp_user_data_dir):
+                            shutil.rmtree(temp_user_data_dir, ignore_errors=True)
+                    except:
+                        pass
+                    
+                    if retry_count < max_retries:
+                        # Create a new unique directory for retry
+                        time.sleep(1)  # Brief pause before retry
+                        pid = os.getpid()
+                        timestamp = int(time.time() * 1000)
+                        random_suffix = uuid.uuid4().hex[:8]
+                        temp_user_data_dir = tempfile.mkdtemp(
+                            prefix=f'chrome_profile_{pid}_{timestamp}_{random_suffix}_retry{retry_count}_'
+                        )
+                        
+                        # Recreate options with new directory
+                        options = self._create_chrome_options(
+                            temp_user_data_dir=temp_user_data_dir,
+                            **kwargs
+                        )
+                    else:
+                        # Max retries reached, re-raise the error
+                        raise
+                else:
+                    # Not a session conflict, re-raise immediately
+                    raise
+        
+        if retry_count >= max_retries and last_error:
+            raise last_error
         
         # Configurações pós-inicialização
         driver.set_page_load_timeout(self.timeout)
